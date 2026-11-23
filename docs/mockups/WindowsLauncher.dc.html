@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Windows kid launcher</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#34d399}a:hover{color:#6ee7b7}
+button{font-family:inherit;cursor:pointer}
+h1,h2{font-family:'Space Grotesk',sans-serif;margin:0}
+</style>
+</helmet>
+<div style="width: 1280px; height: 720px; box-sizing: border-box; background: #04060f; color: #e8edf7; font-family: Inter, sans-serif; font-size: 15px; display: flex; flex-direction: column">
+<header style="display: flex; align-items: center; gap: 14px; padding: 18px 28px 10px">
+<div style="width: 46px; height: 46px; border-radius: 50%; background: #1e3a5f; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 20px; color: #93c5fd">M</div>
+<div style="flex: 1"><h1 style="font-size: 24px; font-weight: 600">Hi Max</h1><div style="color: #8e9ac0; font-size: 13px">Pick something to open</div></div>
+<label for="q" style="position: absolute; left: -9999px">Search apps</label>
+<input id="q" placeholder="Search" style="width: 260px; min-height: 44px; box-sizing: border-box; padding: 0 16px; border-radius: 99px; border: 1px solid #2a3468; background: #070a1c; color: #e8edf7; font-size: 15px">
+</header>
+<div style="flex: 1; display: flex; gap: 22px; padding: 8px 28px 16px; min-height: 0">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0">
+<div style="display: flex; gap: 8px">
+<button style="min-height: 44px; padding: 0 18px; border-radius: 99px; border: 0; background: #34d399; color: #06281c; font-weight: 600; font-size: 15px">All</button>
+<button style="min-height: 44px; padding: 0 18px; border-radius: 99px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">Games</button>
+<button style="min-height: 44px; padding: 0 18px; border-radius: 99px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">School</button>
+<button style="min-height: 44px; padding: 0 18px; border-radius: 99px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">Websites</button>
+<button style="min-height: 44px; padding: 0 18px; border-radius: 99px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">Videos</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px">
+<button style="height: 196px; border-radius: 10px; border: 1px solid #2d6b4f; background: #143a2c; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #34d399; color: #06281c; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Mi</span><span><span style="display: block; font-size: 17px; font-weight: 600">Minecraft</span><span style="display: block; font-size: 13px; color: #a7f3d0">12 min left</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px solid #6b5a2d; background: #3a3014; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #fbbf24; color: #3b2a00; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Sc</span><span><span style="display: block; font-size: 17px; font-weight: 600">Scratch</span><span style="display: block; font-size: 13px; color: #fde68a">Free</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px solid #2d4f6b; background: #142c3a; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #60a5fa; color: #0a2540; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Kh</span><span><span style="display: block; font-size: 17px; font-weight: 600">Khan Academy</span><span style="display: block; font-size: 13px; color: #bfdbfe">Free, website</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px solid #6b2d3a; background: #3a141c; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #fb7185; color: #40000c; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Yt</span><span><span style="display: block; font-size: 17px; font-weight: 600">YouTube</span><span style="display: block; font-size: 13px; color: #fecdd3">30 min left</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px solid #4f2d6b; background: #2a143a; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #c084fc; color: #2a0845; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Tp</span><span><span style="display: block; font-size: 17px; font-weight: 600">Tux Paint</span><span style="display: block; font-size: 13px; color: #e9d5ff">Free</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px solid #2d6b66; background: #143a37; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #2dd4bf; color: #042f2a; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Zo</span><span><span style="display: block; font-size: 17px; font-weight: 600">Zoom</span><span style="display: block; font-size: 13px; color: #99f6e4">Free</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px solid #2a3468; background: #080c22; color: #8e9ac0; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; background: #141b3f; color: #8e9ac0; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600">Ro</span><span><span style="display: block; font-size: 17px; font-weight: 600">Roblox</span><span style="display: block; font-size: 13px">Used up for today</span></span></button>
+<button style="height: 196px; border-radius: 10px; border: 1px dashed #2a3468; background: transparent; color: #e8edf7; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; text-align: left"><span style="width: 56px; height: 56px; border-radius: 14px; border: 1px solid #2a3468; color: #6ee7b7; display: flex; align-items: center; justify-content: center; font-size: 30px">+</span><span><span style="display: block; font-size: 17px; font-weight: 600">Ask for an app</span><span style="display: block; font-size: 13px; color: #8e9ac0">A grown-up decides</span></span></button>
+</div>
+</div>
+<aside style="width: 290px; display: flex; flex-direction: column; gap: 14px">
+<section style="background: #080c22; border: 1px solid #141b3f; border-radius: 10px; padding: 18px; text-align: center">
+<div style="color: #8e9ac0; font-size: 13px">Time left today</div>
+<div style="font-family: 'Space Grotesk', sans-serif; font-size: 52px; font-weight: 600; line-height: 1.1; color: #6ee7b7">0:42</div>
+<div role="img" aria-label="65 percent of today's time used" style="height: 10px; border-radius: 99px; background: #141b3f; margin: 10px 0 8px"><div style="width: 65%; height: 10px; border-radius: 99px; background: #34d399"></div></div>
+<div style="color: #8e9ac0; font-size: 13px">Bedtime at 8:30 pm</div>
+</section>
+<section style="background: #080c22; border: 1px solid #141b3f; border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="font-size: 16px; font-weight: 600">Ask a grown-up</h2>
+<button style="min-height: 44px; border-radius: 10px; border: 1px solid #34d399; background: transparent; color: #6ee7b7; font-size: 15px; font-weight: 500">15 more minutes</button>
+<button style="min-height: 44px; border-radius: 10px; border: 1px solid #34d399; background: transparent; color: #6ee7b7; font-size: 15px; font-weight: 500">30 more minutes</button>
+<button style="min-height: 44px; border-radius: 10px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">A new website</button>
+</section>
+<section style="background: #080c22; border: 1px solid #141b3f; border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<h2 style="font-size: 16px; font-weight: 600">Today</h2>
+<div style="display: flex; justify-content: space-between"><span>Minecraft</span><span style="color: #8e9ac0">48 min</span></div>
+<div style="display: flex; justify-content: space-between"><span>Scratch</span><span style="color: #8e9ac0">20 min</span></div>
+<div style="display: flex; justify-content: space-between"><span>Khan Academy</span><span style="color: #8e9ac0">10 min</span></div>
+</section>
+</aside>
+</div>
+<footer style="height: 56px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 0 20px; background: #070a1c; border-top: 1px solid #141b3f">
+<svg width="26" height="26" viewBox="0 0 120 140" aria-hidden="true"><path d="M60 8 L112 26 V68 C112 100 90 122 60 132 C30 122 8 100 8 68 V26 Z" fill="none" stroke="#34d399" stroke-width="9" stroke-linejoin="round"/><path d="M82 46 H46 V68 H74 V92 H38" fill="none" stroke="#34d399" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<button style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: #0e1433; color: #6ee7b7; font-size: 15px; font-weight: 500">Home</button>
+<button style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #141b3f; background: transparent; color: #e8edf7; font-size: 15px">Minecraft</button>
+<div style="flex: 1"></div>
+<span style="padding: 6px 14px; border-radius: 99px; background: #0e1433; color: #6ee7b7; font-weight: 600; font-family: 'Space Grotesk', sans-serif">0:42 left</span>
+<span style="color: #8e9ac0; font-size: 13px">Wi-Fi on</span>
+<span style="color: #8e9ac0; font-size: 13px">Sound 60%</span>
+<span style="font-weight: 500">6:14 pm</span>
+<button style="min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">Power</button>
+<button style="min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #2a3468; background: transparent; color: #e8edf7; font-size: 15px">Grown-up</button>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":720}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
