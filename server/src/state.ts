@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { mediaFile, removeFile } from './files';
+import { MEDIA_KEEP_DAYS, kidMediaFile, sweepMediaFiles } from './media';
 import { evaluateRules, localTime, type RuleResult } from './rules';
 
 export type Db = Pool | PoolClient;
@@ -113,6 +114,9 @@ export interface RequestRow {
   minutes: number | null;
   detail: string;
   identifier: string | null;
+  /** "Ask to add a friend" only: what the kid wrote about the friend, and the number as typed. */
+  note?: string | null;
+  phone?: string | null;
   status: 'pending' | 'approved' | 'denied';
   created_at: Date;
   decided_at: Date | null;
@@ -199,6 +203,8 @@ export function requestJson(r: RequestRow): Record<string, unknown> {
     minutes: r.minutes,
     detail: r.detail,
     identifier: r.identifier,
+    // A friend request also says what the kid wrote and the number as typed.
+    ...(r.kind === 'contact' ? { note: r.note ?? null, phone: r.phone ?? r.identifier } : {}),
     status: r.status,
     createdAt: r.created_at.toISOString(),
     decidedAt: r.decided_at ? r.decided_at.toISOString() : null,
@@ -316,7 +322,10 @@ export async function lockExpiredTrials(db: Db): Promise<number> {
   return res.rowCount ?? 0;
 }
 
-/** Housekeeping: removes sign-in links, sessions and pairing codes that can no longer be used, and texts past their keep time. */
+/**
+ * Housekeeping: removes sign-in links, sessions and pairing codes that can no longer be used, texts, photos and
+ * videos past their keep time, and files on disk that no row owns any more.
+ */
 export async function purgeExpired(db: Db, dataDir?: string): Promise<void> {
   await db.query("DELETE FROM login_tokens WHERE expires_at < now() - interval '1 day'");
   await db.query('DELETE FROM sessions WHERE expires_at < now()');
@@ -329,4 +338,34 @@ export async function purgeExpired(db: Db, dataDir?: string): Promise<void> {
   await db.query("DELETE FROM texts WHERE at < now() - interval '90 days'");
   const old = await db.query<{ id: string }>("DELETE FROM text_media WHERE created_at < now() - interval '90 days' RETURNING id");
   if (dataDir) for (const m of old.rows) removeFile(mediaFile(dataDir, m.id));
+  // Copies of kids' photos and videos: the same 90 days, counted from the day the copy arrived. Links end on their own date.
+  const media = await db.query<{ id: string; account_id: string; kid_id: string }>(
+    'DELETE FROM kid_media WHERE created_at < now() - make_interval(days => $1) RETURNING id, account_id, kid_id',
+    [MEDIA_KEEP_DAYS],
+  );
+  if (dataDir) for (const m of media.rows) removeFile(kidMediaFile(dataDir, m.account_id, m.kid_id, m.id));
+  await db.query('UPDATE kid_media SET share_token_hash = NULL, share_nonce = NULL, share_expires_at = NULL WHERE share_expires_at < now()');
+  if (dataDir) await sweepOrphanFiles(db, dataDir);
+}
+
+/** Files whose family, kid or row is gone (a kid removed, a family removed straight in the database, a broken upload). */
+export async function sweepOrphanFiles(db: Db, dataDir: string, now: number = Date.now()): Promise<number> {
+  return sweepMediaFiles(
+    dataDir,
+    {
+      async kids(accountIds) {
+        const rows = await db.query<{ account_id: string; id: string }>('SELECT account_id, id FROM kids WHERE account_id = ANY($1::uuid[])', [accountIds]);
+        return new Set(rows.rows.map((k) => `${k.account_id}/${k.id}`));
+      },
+      async media(ids) {
+        const rows = await db.query<{ id: string }>('SELECT id FROM kid_media WHERE id = ANY($1::uuid[])', [ids]);
+        return new Set(rows.rows.map((m) => m.id));
+      },
+      async textMedia(ids) {
+        const rows = await db.query<{ id: string }>('SELECT id FROM text_media WHERE id = ANY($1::uuid[])', [ids]);
+        return new Set(rows.rows.map((m) => m.id));
+      },
+    },
+    now,
+  );
 }

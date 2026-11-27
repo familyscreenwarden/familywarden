@@ -1,6 +1,6 @@
 import type {
   Account, AndroidApp, Apk, AppPatch, Billing, ChatMessage, Chore, ChoreApproval, ChoreInput, ContactInput, Dashboard, Device, Kid, KidDetail,
-  KidPatch, KidPhone, KidRequest, KidTexts, LauncherLook, NewApp, PairingCode, PhoneRules, PhoneText, Platform, Report, SetupQr,
+  KidMedia, KidPatch, KidPhone, KidRequest, KidTexts, LauncherLook, NewApp, PairingCode, PhoneRules, PhoneText, Platform, Report, SetupQr,
   TimeCode, UnlockCode, WifiInput,
 } from './types';
 
@@ -152,6 +152,9 @@ export function createApi(fetchFn: FetchLike, hooks: ApiHooks = {}) {
     deleteHeldText: (tId: string) => post<unknown>(`/api/texts/${id(tId)}/delete`),
     blockNumber: (kidId: string, phone: string) => post<unknown>(`/api/kids/${id(kidId)}/blocked-numbers`, { phone }),
     unblockNumber: (kidId: string, num: string) => del<unknown>(`/api/kids/${id(kidId)}/blocked-numbers/${id(num)}`),
+    kidMedia: (kidId: string) => get<KidMedia>(`/api/kids/${id(kidId)}/media`),
+    deleteMedia: (mId: string) => del<unknown>(`/api/media/${id(mId)}`),
+    endMediaLink: (mId: string) => del<unknown>(`/api/media/${id(mId)}/link`),
     apks: () => get<{ maxBytes: number; apks: Apk[] }>('/api/apks'),
     uploadApk: (name: string, file: File) => request<{ apk: Apk }>('POST', `/api/apks/upload?name=${id(name)}`, undefined, { data: file, name: file.name }),
     deleteApk: (aId: string) => del<unknown>(`/api/apks/${id(aId)}`),

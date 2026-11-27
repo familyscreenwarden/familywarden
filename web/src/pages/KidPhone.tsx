@@ -2,9 +2,10 @@ import { useId, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApp, useLoad } from '../app';
-import type { Chore, ChoreInput, ChoreRepeat, KidPhone, LauncherTheme, PhoneRules, PhoneText, TextThread, TimeCode } from '../api/types';
+import type { Chore, ChoreInput, ChoreRepeat, KidPhone, LauncherTheme, PhoneRules, TimeCode } from '../api/types';
+import { KidSections, KidTabs } from '../components/KidNav';
 import { Card, Confirm, ErrorBox, ICON, Icon, Loading, PageHead, Switch } from '../components/ui';
-import { safeColor, textOn } from '../lib/color';
+import { textOn } from '../lib/color';
 import { plural, possessive, timeAgo } from '../lib/format';
 
 type SaveFn = (key: string, action: () => Promise<unknown>, okText: string) => Promise<boolean>;
@@ -64,16 +65,7 @@ export function KidPhonePage() {
   return (
     <>
       <PageHead title={`${possessive(kid.name)} phone and chores`} sub={p.phones.length ? `Applies to ${p.phones.map((d) => d.name).join(', ')}` : `${kid.name} has no Android phone yet. These settings apply as soon as you add one.`}>
-        <nav className="tabs" aria-label="Kid">
-          {(kids.data?.kids ?? []).map((k) => {
-            const on = k.id === kid.id;
-            const bg = safeColor(k.color);
-            return (
-              <Link key={k.id} to={`/kids/${k.id}/phone`} className={`tab${on ? ' on' : ''}`} aria-current={on ? 'page' : undefined}
-                style={on ? { background: bg, color: textOn(bg) } : undefined}>{k.name}</Link>
-            );
-          })}
-        </nav>
+        <KidTabs kids={kids.data?.kids ?? []} currentId={kid.id} section="phone" />
       </PageHead>
       <KidSections kidId={kid.id} current="phone" />
 
@@ -92,18 +84,14 @@ export function KidPhonePage() {
         </div>
       </div>
 
-      <TextsCard kidId={kid.id} kidName={kid.name} />
+      <Card title="Texts, photos and videos">
+        <p className="small muted">Copies of what {kid.name} writes, takes and makes on the phone, for you to look at.</p>
+        <div className="row-between" style={{ justifyContent: 'flex-start' }}>
+          <Link to={`/kids/${kid.id}/texts`} className="btn btn-ghost">Read {possessive(kid.name)} texts</Link>
+          <Link to={`/kids/${kid.id}/photos`} className="btn btn-ghost">See {possessive(kid.name)} photos and videos</Link>
+        </div>
+      </Card>
     </>
-  );
-}
-
-/** The two pages of one kid: the rules, and the phone and chores. */
-export function KidSections({ kidId, current }: { kidId: string; current: 'rules' | 'phone' }) {
-  return (
-    <nav className="subtabs" aria-label="Sections">
-      <Link to={`/kids/${kidId}`} className={`subtab${current === 'rules' ? ' on' : ''}`} aria-current={current === 'rules' ? 'page' : undefined}>Time, apps and websites</Link>
-      <Link to={`/kids/${kidId}/phone`} className={`subtab${current === 'phone' ? ' on' : ''}`} aria-current={current === 'phone' ? 'page' : undefined}>Phone and chores</Link>
-    </nav>
   );
 }
 
@@ -364,7 +352,11 @@ function ContactRulesCard({ kidId, kidName, phone, busy, save }: { kidId: string
   const { api } = useApp();
   return (
     <Card title="Calls and texts" action={<Link to={`/kids/${kidId}`} className="small">Add or edit contacts</Link>}>
-      <p className="small muted">People {kidName} can call or text. "When locked" means they can also be reached when time is up, at bedtime, or when you locked the phone. Emergency calls always work.</p>
+      <p className="small muted">
+        People {kidName} can reach. With "Call" on, a contact is family: calls and texts both ways, and with "When locked" on also when time is up, at
+        bedtime, or when you locked the phone. With only "Text" on, a contact is a friend: {kidName} can text and call them, but never while the phone
+        is locked. Texts from anyone else are held for you under <Link to={`/kids/${kidId}/texts`}>Texts</Link>. Emergency calls always work.
+      </p>
       {phone.contacts.length === 0 ? <p className="empty">No family contacts yet. Add them on the "Time, apps and websites" page.</p> : (
         <div className="table-wrap" tabIndex={0} role="region" aria-label="Call and text rules table">
           <table className="table" style={{ minWidth: 420 }}>
@@ -391,105 +383,5 @@ function ContactRulesCard({ kidId, kidName, phone, busy, save }: { kidId: string
         </div>
       )}
     </Card>
-  );
-}
-
-// ---------------------------------------------------------------- texts (read only)
-
-function TextsCard({ kidId, kidName }: { kidId: string; kidName: string }) {
-  const { api, run } = useApp();
-  const texts = useLoad(() => api.kidTexts(kidId), [kidId], 60000);
-  const [open, setOpen] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const t = texts.data;
-
-  async function act(action: () => Promise<unknown>, okText: string) {
-    setBusy(true);
-    await run(action, okText);
-    await texts.reload();
-    setBusy(false);
-  }
-
-  return (
-    <Card title="Texts on the phone">
-      {!t && (texts.error ? <ErrorBox message={texts.error} onRetry={() => void texts.reload()} /> : <Loading label="Loading texts" />)}
-      {t && t.threads.length === 0 && t.held.length === 0 && (
-        <p className="empty">
-          Nothing here yet. {kidName} texts family contacts from the phone's home screen, and those texts stay on the phone. Copies show up here once
-          the phone app sends them to this console; the current version of the app does not do that yet.
-        </p>
-      )}
-      {t && (t.threads.length > 0 || t.held.length > 0) && (
-        <p className="small muted">A copy of {possessive(kidName)} texts, to read only. Kept for {t.keepDays} days.</p>
-      )}
-      {t && t.held.length > 0 && (
-        <div className="stack">
-          <div className="label">Held: from numbers that are not on {possessive(kidName)} list</div>
-          {t.held.map((h) => (
-            <div key={h.id} className="inset request">
-              <div className="request-body">
-                <div className="request-meta"><span>{h.from ?? 'Unknown number'}, {timeAgo(h.at)}</span><span className="pill pill-warn">Held</span></div>
-                <div style={{ overflowWrap: 'anywhere' }}>{h.body || 'Photo'}</div>
-                <div className="tiny muted">{kidName} has not seen this text.</div>
-              </div>
-              <button type="button" className="btn btn-danger" disabled={busy || !h.from}
-                onClick={() => void act(() => api.blockNumber(kidId, h.from ?? ''), `${h.from} is blocked.`)}>Block number</button>
-              <button type="button" className="btn btn-ghost" disabled={busy}
-                onClick={() => void act(() => api.deleteHeldText(h.id), 'The text was deleted.')}>Delete</button>
-            </div>
-          ))}
-        </div>
-      )}
-      {t && t.threads.map((th) => (
-        <ThreadRow key={th.thread} kidId={kidId} kidName={kidName} thread={th} open={open === th.thread} onToggle={() => setOpen((o) => (o === th.thread ? null : th.thread))} />
-      ))}
-      {t && t.blocked.length > 0 && (
-        <div className="stack">
-          <div className="label">Blocked numbers</div>
-          {t.blocked.map((b) => (
-            <div key={b.num} className="row-between">
-              <span>{b.phone}</span>
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void act(() => api.unblockNumber(kidId, b.num), `${b.phone} is no longer blocked.`)}>Unblock</button>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function ThreadRow({ kidId, kidName, thread, open, onToggle }: { kidId: string; kidName: string; thread: TextThread; open: boolean; onToggle: () => void }) {
-  const { api } = useApp();
-  const panel = useId();
-  const title = thread.names.join(', ');
-  return (
-    <div className="inset stack">
-      <button type="button" className="thread-head" aria-expanded={open} aria-controls={panel} onClick={onToggle}>
-        <span className="grow" style={{ minWidth: 0 }}>
-          <span className="thread-title">{title}</span>
-          <span className="tiny muted thread-last">{thread.last.dir === 'out' ? `${kidName}: ` : thread.last.fromName ? `${thread.last.fromName}: ` : ''}{thread.last.body}</span>
-        </span>
-        <span className="tiny muted" style={{ whiteSpace: 'nowrap' }}>{plural(thread.count, 'text', 'texts')} · {timeAgo(thread.at)}</span>
-      </button>
-      {open && <div id={panel}><ThreadTexts load={() => api.textThread(kidId, thread.thread)} kidName={kidName} /></div>}
-    </div>
-  );
-}
-
-function ThreadTexts({ load, kidName }: { load: () => Promise<{ texts: PhoneText[] }>; kidName: string }) {
-  const data = useLoad(load, []);
-  if (!data.data) return data.error ? <ErrorBox message={data.error} onRetry={() => void data.reload()} /> : <Loading label="Loading the chat" />;
-  return (
-    <ol className="bubbles">
-      {data.data.texts.map((m) => (
-        <li key={m.id} className={`bubble ${m.dir === 'out' ? 'out' : 'in'}`}>
-          <div className="tiny muted">{m.dir === 'out' ? kidName : (m.fromName ?? m.from ?? 'Unknown')} · {timeAgo(m.at)}</div>
-          {m.body && <div style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{m.body}</div>}
-          {m.media.map((x, i) => (x.url && x.type.startsWith('image/')
-            ? <img key={i} className="bubble-img" src={x.url} alt={`Photo in a text ${m.dir === 'out' ? `from ${kidName}` : `to ${kidName}`}`} loading="lazy" />
-            : <div key={i} className="tiny muted">{x.url ? 'Attachment (not a photo)' : 'Photo not uploaded by the phone yet'}</div>))}
-        </li>
-      ))}
-    </ol>
   );
 }

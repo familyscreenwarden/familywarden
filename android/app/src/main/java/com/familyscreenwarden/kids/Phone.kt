@@ -47,17 +47,6 @@ object Phone {
     } catch (e: Exception) { Log.w(Kids.TAG, "sms: ${e.message}"); false }
 }
 
-/** Texts from family show on the launcher (the kid's Messages app is closed while time is up). */
-class SmsReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
-        Kids.init(context)
-        val parts = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
-        val from = parts.firstOrNull()?.originatingAddress ?: return
-        Kids.incomingSms(from, parts.joinToString("") { it.messageBody ?: "" })
-    }
-}
-
 /** While the phone is locked (time's up, bedtime), only family can call in. Needs the call-screening role (setup asks). */
 class FamilyCallScreening : CallScreeningService() {
     override fun onScreenCall(details: Call.Details) {

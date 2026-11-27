@@ -80,11 +80,14 @@ and offline emergency codes), chores for extra time, and the family chat.
 
 - **Network contract.** Every request body and response shape is as in the source; only the path prefix changed
   (`/api/warden/setup/check`, `sync`, `launcher`, `launcher/act`, `pin`, `redeem`; `/api/android/pair`, `request`;
-  APK and update downloads). All of it goes through `WardenApi.kt` (the comment at the top says so). `core/`
+  APK and update downloads; since the second update also `/api/android/friend`, `text-media`, `media`, see below).
+  All of it goes through `WardenApi.kt` (the comment at the top says so). `core/`
   (Engine, Models, Dns, SafeSearch, Sites, AppMatch, UnlockCodes) only lost the game's settings field.
 - **The page ↔ app messages** are the same, minus the game's. Page → app: `hello`, `home`, `front`,
   `switch`, `dialog`, `launch`, `site`, `volume`, `power`, `call`, `call-answer`, `call-end`, `call-mute`,
-  `call-speaker`, `text`, `emergency`, `pin`, `code`, `desktop`, `act` (`ask`, `chore`, `chat`, `look`), `parent`. App →
+  `call-speaker`, `text`, `emergency`, `pin`, `code`, `desktop`, `act` (`ask`, `chore`, `chat`, `look`), `parent`;
+  since the second update also `texts`, `camera`, `movies`, `sound-mode`, `volume-set`, `brightness`,
+  `screen-timeout`, `rotate`, `text-size`, `call` with `num` (a friend), and `parent` with `what: "rotate"`. App →
   page: `state`, `toast`, `dialog`, `pin`, `code`, `result`. `index.html?phone` and `index.html?bar` work as before.
 - **Chores ("Earn more time").** The list is a card on the home screen. On the lock screen "Do a chore" now opens the
   same list as a dialog (in the source it scrolled a list that was hidden behind the lock screen). A tap sends
@@ -98,9 +101,11 @@ and offline emergency codes), chores for extra time, and the family chat.
   `act { action: "look", layout: <the stored layout or "bright">, theme }`, the same shape as before.
 - **Tile colours** come from six brand tints, in turn. The icon colour the app works out (`tiles[key].color`) is still
   sent but the page no longer uses it. Real app icons are shown when the app provides them.
-- **Phone bar:** Home, Call family, Text family (with a dot for a new text), Grown-up, as in the approved mockup.
-  The clock, the time pill and the sound/Wi-Fi buttons left the phone bar (time is in the card at the top). "Power"
-  (screen off, restart) and "Colours" moved to two quiet buttons at the bottom of the home screen.
+- **Phone bar:** Home, Phone, Texts (with the number of new texts), Sound, Grown-up. (The first port had Home, Call
+  family, Text family, Grown-up, as in the approved mockup; the second update below added Texts and Sound and made
+  the Phone menu calls only.) The clock, the time pill and the Wi-Fi button are not on the phone bar (time is in the
+  card at the top). "Sound and screen" and "Colours" are also two quiet buttons at the bottom of the home screen;
+  screen off and restart are inside Sound and screen.
 - **Phone lock screen** covers the bar (as in the mockup) and carries its own Emergency call and Grown-up PIN
   buttons, the family list and the last two texts. At bedtime the Grown-up PIN button still offers the 30-minute
   skip; otherwise it opens the grown-up menu.
@@ -156,3 +161,118 @@ and offline emergency codes), chores for extra time, and the family chat.
     `TEST_DATABASE_URL`) was written from `server/test/helpers.ts` and has not been run.
 11. `store/icon-512.png` was rendered from `store/icon.svg` with headless Chrome. No Play Store listing art beyond
     that exists.
+
+---
+
+# Second update: Texts, Camera and Movie Maker, Sound and screen (27 November)
+
+The source app changed a lot in the day after the port. All of it was brought in. "Source" below still means the
+earlier in-house app and its launcher page.
+
+## What came in
+
+- **Camera, My photos and Movie Maker:** `StudioActivity.kt`, `Studio.kt`, `core/StudioRules.kt`, `assets/studio/`.
+  Copies go to the server; photos go out in Texts, videos and movies as a link.
+- **Texts with picture and group texts:** `Texts.kt`, `TextsActivity.kt`, `TextReceivers.kt` (the receivers, the
+  quick-reply service and the "text this number" activity Android asks of a texting app), `core/Mms.kt`,
+  `core/TextRules.kt`, `assets/texts/`, `res/xml/files.xml`. `SmsReceiver` moved from `Phone.kt` to
+  `TextReceivers.kt`.
+- **Sound and screen:** `Sound.kt` (sound on / vibrate / mute with family calls still ringing, volumes, brightness,
+  screen timeout, text size, auto-rotate), with power inside it on phones.
+- **The Phone menu is calls only** (family, approved friends, recent calls).
+- **Updates and pushed APKs on quick-install phones** (`Installer.kt`: asks once per version, leaves a notification).
+- **Allowed apps no longer go missing after a restart** (`Apps.kt`, `Kids.watchPackages`, `Kids.unlocked`,
+  `BootReceiver`).
+- **The screen turns with the phone** (manifest `fullUser`, the switch, the grown-up menu option, sideways layouts).
+- Manifest (9 permissions, the camera feature, 2 activities + the compose activity, 4 receivers, 1 service, the file
+  provider), `Policy.kt`, `Kids.kt`, `core/Models.kt` (`Friend`, `AskedFriend`, `TextingInfo`, `Snapshot.texting`),
+  `SetupActivity.kt` (the "Make it the texting app" step), `WardenApi.kt` (`upload`).
+- The unit tests `StudioTest.kt` and `TextsTest.kt` (which also holds `MmsTest` and `TextRulesTest`).
+
+How: the source's files from before and after its change were put through the port's renames, and each file the port
+already had was merged three ways (port, source before, source after). One merge needed a hand (the setup screen's
+colour constant). New files were copied through the same renames, then read and edited by hand.
+
+## Where this differs from the source
+
+- **Names.** Bridges `ScreenWardenTexts` and `ScreenWardenStudio`; in-app addresses `media.screenwarden`,
+  `pick.screenwarden`, `gallery.screenwarden`, `studio-media.screenwarden`; `Texts.applyServer`; the launcher's own
+  tile keys `sw-texts`, `sw-camera`, `sw-movies`. Wording on screen and in comments says Family Screen Warden / the
+  parent console / your family.
+- **One header on the wire: `X-FSW-Upload: 1`** on the two raw uploads (the source's header carried its product
+  name; this is the header the server already uses for APK uploads). Nothing else on the wire was renamed. See
+  SERVER-CONTRACT-CHANGES.md.
+- **The camera upload goes through `WardenApi.sendFile`** (new). The source opened a connection of its own in
+  `Studio.kt`; here all server traffic stays in `WardenApi.kt`. Same request.
+- **Fonts for the new pages.** `assetPath()` (bottom of `StudioActivity.kt`) answers `/fonts/…` from the launcher's
+  bundled fonts for the Texts and Camera pages, so there is one copy of the fonts and nothing loads from outside.
+- **Look.** `assets/texts` and `assets/studio` were re-skinned to the launcher's dark dashboard (same tokens, fonts,
+  44 px buttons). Their CSS files were rewritten; class names, HTML structure and JavaScript are the source's, apart
+  from avatar colours (the six brand tints) and a few inline styles that moved into the CSS. Sticker, filter and
+  sample-picture colours inside the camera and movies are content and were left alone. The emoji picker in Texts
+  stays (it types emoji into a text). Sideways layouts were added for the Texts page (the source had them for the
+  camera and Movie Maker only). One layout fault was fixed: in Movie Maker's "Add clips" sheet the squares overlapped.
+- **Launcher.** The source's emoji buttons became text labels, as everywhere in this launcher. The source's bar
+  icons for Texts and Sound became two more buttons on the phone bar; the Texts, Camera and Movie Maker tiles have
+  small line drawings instead of emoji. Because the lock screen covers the bar here, the lock screen got a **Texts**
+  button (family texts still work when the phone is locked). On an app without its own Texts screen
+  (`phone.texts` missing) the Texts button still opens the old "Text family" list. Nothing that was removed came
+  back (no game, hero, layouts, feed or cheers).
+- **CI.** The page check now also covers the Texts and Camera pages and their fonts. The unit-test step already runs
+  every test class.
+
+## Line counts (source file → this app's file; "changed" = lines that differ after the automatic renames)
+
+| File | Source | Here | Changed |
+| --- | --- | --- | --- |
+| `Sound.kt` | 176 | 176 | 8 |
+| `Studio.kt` | 216 | 198 | 9 |
+| `StudioActivity.kt` | 328 | 337 | 20 |
+| `TextReceivers.kt` | 96 | 96 | 0 |
+| `Texts.kt` | 473 | 473 | 5 |
+| `TextsActivity.kt` | 348 | 348 | 13 |
+| `core/Mms.kt` | 269 | 269 | 0 |
+| `core/StudioRules.kt` | 104 | 104 | 1 |
+| `core/TextRules.kt` | 38 | 38 | 0 |
+| `test StudioTest.kt` | 74 | 74 | 1 |
+| `test TextsTest.kt` | 103 | 103 | 0 |
+| `res/xml/files.xml` | 6 | 6 | 0 |
+| `assets/studio/index.html` | 182 | 182 | 7 |
+| `assets/studio/studio.js` | 1467 | 1467 | 11 |
+| `assets/studio/studio.css` | 258 | 288 | 180 |
+| `assets/texts/index.html` | 84 | 84 | 0 |
+| `assets/texts/texts.js` | 286 | 284 | 12 |
+| `assets/texts/texts.css` | 111 | 165 | 127 |
+
+For the files the port already had, the number of lines the source added equals the number added here in every file
+(Apps 7, Calls 2, Installer 48, Kids 105, KidsService 2, LauncherActivity 9, Policy 17, SetupActivity 10, Models 10,
+manifest 60; Phone.kt only lost `SmsReceiver`), except `WardenApi.kt` (18 in the source, 45 here: `sendFile` and a
+longer comment).
+
+## Checked, and not
+
+Still **not compiled**: there is no Android SDK on this machine. What ran:
+
+- The pure-Kotlin tests with Gradle's bundled Kotlin 2.0.21 compiler (`core/*.kt` and the three test files; not the
+  project's compiler, no serialization plugin): **37 tests, all passed** (the 26 from before, plus StudioTest, MmsTest
+  and TextRulesTest).
+- Every Kotlin file's `package` matches its folder; every `com.familyscreenwarden…` import resolves; all 26
+  components in the manifest have a class (the file provider is androidx's); every permission the source added is
+  there; `@xml/files` and both themes exist; all XML parses; the workflow YAML parses and its page check passes here.
+- `node --check` on `launcher.js`, `android.js`, `texts.js`, `studio.js`.
+- No file, name or text in `android/`, `launcher/` or `.github/` mentions the source product or its game.
+- Headless Chrome: the launcher at 390x844, 844x390 and 1280x720; the Texts page with the app's bridge stubbed
+  (chats, bedtime, a chat with photos / failed / sending texts, new text, ask a friend, gallery; upright, sideways and
+  wide); the Camera page with the bridge stubbed and Chrome's fake camera (camera, video mode, My photos, picking,
+  viewer, delete, empty Movie Maker, closed at bedtime) and with its own sample data (Movie Maker and its sheets,
+  making, done). No console errors, no request outside the page and the app's own addresses, bundled fonts loaded.
+
+Not checked, so the first CI build and a real phone are the test:
+
+1. Everything Android-facing: `Texts.kt`, `TextsActivity.kt`, `TextReceivers.kt`, `Studio.kt`, `StudioActivity.kt`,
+   `Sound.kt` and the merged files have not been through a compiler here.
+2. Sending and receiving real texts and picture texts, the camera on a real WebView, recording and making a movie
+   (Chrome's fake camera only showed the screens), uploads, the link, auto-rotate, brightness.
+3. `WardenApi.sendFile` is new code written for this port.
+4. The server side of SERVER-CONTRACT-CHANGES.md was being written at the same time and was not tried against this app.
+5. The page that a video link opens is the server's; the app only passes the link on.

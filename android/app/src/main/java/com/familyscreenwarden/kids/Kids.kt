@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.media.AudioManager
 import android.net.ConnectivityManager
@@ -89,6 +90,8 @@ object Kids {
     fun atHome() { launched = null; lastFg = null }
     /** The launcher page, when it's open. */
     var page: ((String) -> Unit)? = null
+    /** This app's screens apply the text size and their own brightness again (Sound and screen changed). */
+    var onBrightness: (() -> Unit)? = null
 
     // Our own steady clock: changing the phone's clock does nothing (the server's time corrects it at every sync).
     private val anchorWall = System.currentTimeMillis()
@@ -114,6 +117,9 @@ object Kids {
         nm.createNotificationChannel(NotificationChannel("kids", "Family Screen Warden", NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel("service", "Screen time", NotificationManager.IMPORTANCE_MIN))
         nm.createNotificationChannel(NotificationChannel("calls", "Phone calls", NotificationManager.IMPORTANCE_HIGH).apply { setSound(null, null) })
+        Texts.init(ctx)
+        Sound.init(ctx)
+        Studio.init(ctx)
     }
 
     /** Called by KidsService: the 1-second clock, the server check-ins and the launcher extras. */
@@ -129,6 +135,9 @@ object Kids {
                 val dt = ((t - last) / 1000.0).coerceIn(0.0, 5.0)
                 last = t
                 runCatching { step(dt) }.onFailure { Log.w(TAG, "step: ${it.message}") }
+                runCatching { watchPackages() }
+                runCatching { Texts.tick() }
+                runCatching { Sound.keepRotation() }
                 delay(1000)
             }
         }
@@ -147,12 +156,47 @@ object Kids {
             while (true) {
                 if (paired && snap != null && now() - launcherAt > 60_000) refreshLauncher()
                 runCatching { installer.upkeep() }
+                // Photos and videos from Camera and Movie Maker: copies go to the parent console.
+                if (paired) api?.let { h -> runCatching { Studio.upkeep(h) } }
                 delay(15_000)
             }
         }
     }
 
     fun syncSoon() { syncNow = true }
+
+    private var cameraPkg: String? = null
+    private var cameraUntil = 0L
+    /** Lets the camera app open for the texting app's "Take a picture" (2 minutes). */
+    fun allowCamera(pkg: String) {
+        cameraPkg = pkg; cameraUntil = System.currentTimeMillis() + 120_000
+        lastEnforced = ""
+        scope.launch { val st = gate.withLock { engine.status(now(), offline) }; enforce(st) }
+    }
+
+    // Apps installed or removed. Android doesn't send PACKAGE_ADDED to a manifest receiver any more (Android 8+), so
+    // the phone asks every couple of seconds what changed (getChangedPackages is cheap).
+    private var pkgSeq = -1
+    private var knownPkgs: MutableSet<String>? = null
+    private var pkgCheckAt = 0L
+    private fun watchPackages() {
+        val t = SystemClock.elapsedRealtime()
+        if (t - pkgCheckAt < 2000) return
+        pkgCheckAt = t
+        val pm = ctx.packageManager
+        val known = knownPkgs ?: pm.getInstalledPackages(PackageManager.MATCH_DIRECT_BOOT_AWARE or PackageManager.MATCH_DIRECT_BOOT_UNAWARE).map { it.packageName }.toMutableSet().also { knownPkgs = it }
+        if (pkgSeq < 0) { pkgSeq = pm.getChangedPackages(0)?.sequenceNumber ?: 0; return }
+        val ch = pm.getChangedPackages(pkgSeq) ?: return
+        pkgSeq = ch.sequenceNumber
+        var any = false
+        for (p in ch.packageNames) {
+            if (p == ctx.packageName) continue
+            val there = runCatching { pm.getPackageInfo(p, PackageManager.MATCH_DIRECT_BOOT_AWARE or PackageManager.MATCH_DIRECT_BOOT_UNAWARE); true }.getOrDefault(false)
+            if (there && known.add(p)) { notePackageAdded(p); any = true }
+            else if (!there && known.remove(p)) any = true
+        }
+        if (any) { apps.invalidate(); lastInstalledReport = 0L; lastEnforced = ""; syncSoon() }
+    }
 
     // ---------------------------------------------------------------- the clock and the rules
     private suspend fun step(dt: Double) {
@@ -206,7 +250,7 @@ object Kids {
 
     /** A contact's name for a phone number (calls on the launcher show "Mom", not the number). */
     fun contactName(number: String?): String? =
-        number?.let { n -> snap?.phone?.contacts?.firstOrNull { Phone.same(it.phone, n) }?.name }
+        number?.let { n -> snap?.phone?.contacts?.firstOrNull { Phone.same(it.phone, n) }?.name ?: snap?.texting?.friends?.firstOrNull { Phone.same(it.phone, n) }?.name }
 
     /** What's in front right now (Android's usage events, or the app opened from the launcher when they aren't allowed). */
     private fun foreground(): String? {
@@ -251,6 +295,8 @@ object Kids {
             if (playOpen) allowed += policy.playPackages()
         }
         if (settingsOpen) allowed += "com.android.settings"
+        // The texting app's "Take a picture": the camera, for a couple of minutes.
+        cameraPkg?.takeIf { System.currentTimeMillis() < cameraUntil }?.let { allowed += it }
         val key = "${allowed.sorted()}|${status.state}|$playOpen|$settingsOpen|${json.encodeToString(rules)}|${sitesKey(s)}"
         if (key == lastEnforced) return
         val wasLocked = lastEnforced.contains("|locked|")
@@ -312,6 +358,7 @@ object Kids {
         val sendInstalled = now() - lastInstalledReport > 6 * 3600_000L
         val results = synchronized(installResults) { installResults.toList() }
         val played = synchronized(playInstalled) { playInstalled.toList() }
+        val texts = runCatching { Texts.toReport() }.getOrDefault(emptyList())
         val body = buildJsonObject {
             put("version", version)
             putJsonArray("unlocksUsed") { unlocks.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
@@ -336,6 +383,7 @@ object Kids {
                 put("observeOnly", watchOnly)
             }
             if (results.isNotEmpty()) put("installResults", buildJsonArray { results.forEach { add(it) } })
+            if (texts.isNotEmpty()) put("texts", buildJsonArray { texts.forEach { add(it.second) } })
             if (played.isNotEmpty()) put("playInstalled", buildJsonArray { played.forEach { (p, l) -> add(buildJsonObject { put("package", p); put("label", l) }) } })
             putJsonObject("device") {
                 put("model", "${Build.MANUFACTURER} ${Build.MODEL}".take(80))
@@ -352,6 +400,9 @@ object Kids {
             val s = json.decodeFromString<Snapshot>(text)
             synchronized(installResults) { installResults.removeAll(results.toSet()) }
             synchronized(playInstalled) { playInstalled.removeAll(played.toSet()) }
+            Texts.reported(texts)
+            Texts.applyServer(s.texting)
+            scope.launch { runCatching { Texts.uploadMedia(h) } }
             if (sendInstalled) lastInstalledReport = now()
             gate.withLock {
                 if (day.isNotEmpty()) engine.markReported(day, general, appsUsed)
@@ -391,6 +442,9 @@ object Kids {
             syncSoon()
         }
         lastEnforced = ""
+        // Tell the server right away, so a new app shows in the parent console's list of apps on the phone, to allow.
+        lastInstalledReport = 0L
+        syncSoon()
     }
 
     private suspend fun refreshLauncher() {
@@ -432,6 +486,13 @@ object Kids {
                 put("contacts", json.encodeToJsonElement(s?.phone?.contacts ?: emptyList()))
                 put("messages", json.encodeToJsonElement(store.loadMessages()))
                 Calls.dto { contactName(it) }?.let { put("call", it) }
+                // The texting app (TextsActivity): the launcher's Texts button opens it.
+                // Friends a grown-up said yes to (calls too, not when locked), the last calls, and Sound and screen.
+                put("friends", json.encodeToJsonElement(s?.texting?.friends ?: emptyList()))
+                put("recent", Sound.recentCalls { n -> contactName(n) })
+                put("sound", Sound.dto())
+                put("texts", true)
+                put("textsUnread", runCatching { Texts.unreadShown() }.getOrDefault(0))
             }
         }.toString()
     }
@@ -492,8 +553,29 @@ object Kids {
                 m["level"]?.toString()?.toIntOrNull()?.let { am.setStreamVolume(AudioManager.STREAM_MUSIC, it * am.getStreamMaxVolume(AudioManager.STREAM_MUSIC) / 100, 0) }
                 m["mute"]?.toString()?.toBooleanStrictOrNull()?.let { am.adjustStreamVolume(AudioManager.STREAM_MUSIC, if (it) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE, 0) }
             }
-            "power" -> if (s("what") == "sleep") policy.lockNow() else policy.reboot()
-            "call" -> contact(s("id"))?.let { Calls.dialing(it.phone); Phone.call(ctx, it.phone) }
+            "power" -> if (s("what") == "sleep") { if (!policy.lockNow()) toast("Press the phone's side button to turn the screen off.") }
+                else policy.reboot()?.let { toast(it) }
+            "call" -> {
+                val num = contact(s("id"))?.phone ?: s("num").takeIf { n -> n.isNotBlank() && snap?.texting?.friends?.any { Phone.same(it.phone, n) } == true }
+                when {
+                    num == null -> {}
+                    contact(s("id")) == null && lockedNow -> toast("You can call friends again when bedtime or time's up is over.")
+                    else -> { Calls.dialing(num); Phone.call(ctx, num) }
+                }
+            }
+            "sound-mode" -> { Sound.setMode(s("mode")); page?.invoke(pageState()) }
+            "volume-set" -> { Sound.setVolume(s("which"), m["level"]?.toString()?.toIntOrNull() ?: 50); page?.invoke(pageState()) }
+            "brightness" -> { Sound.setBrightness(m["level"]?.toString()?.toIntOrNull() ?: 60)?.let { toast(it) }; onBrightness?.invoke(); page?.invoke(pageState()) }
+            "screen-timeout" -> { Sound.setTimeout(m["sec"]?.toString()?.toIntOrNull() ?: 60)?.let { toast(it) }; page?.invoke(pageState()) }
+            "rotate" -> { Sound.setRotation(m["on"]?.toString() == "true")?.let { toast(it) }; page?.invoke(pageState()) }
+            "text-size" -> { Sound.setTextZoom(m["zoom"]?.toString()?.toIntOrNull() ?: 100); onBrightness?.invoke(); page?.invoke(pageState()) }
+            "camera", "photos", "movies" -> {
+                if (lockedNow) { toast(if (statusNow().lockReason == "bedtime") "Camera and Movie Maker are closed at bedtime." else "Camera and Movie Maker are closed right now."); return@launch }
+                runCatching {
+                    ctx.startActivity(Intent(ctx, StudioActivity::class.java).putExtra("mode", when (s("cmd")) { "camera" -> "camera"; "photos" -> "photos"; else -> "movie" })
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.onFailure { toast("That didn't open.") }
+            }
             "call-answer" -> { Calls.answer(); page?.invoke(pageState()) }
             "call-end" -> { if (!Calls.hangUp()) toast("Use the phone's red button to hang up."); page?.invoke(pageState()) }
             "call-mute" -> { Calls.mute(m["on"]?.toString() == "true"); page?.invoke(pageState()) }
@@ -503,6 +585,11 @@ object Kids {
                 if (Phone.sms(ctx, c.phone, text)) {
                     store.saveMessages(store.loadMessages() + FamilyMessage(UUID.randomUUID().toString(), c.id, c.name, text, java.time.Instant.now().toString(), mine = true))
                 } else toast("That didn't send. Try calling instead.")
+            }
+            "texts" -> {
+                val i = Intent(ctx, TextsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                contact(s("id"))?.let { i.putExtra("to", arrayOf(it.phone)) }
+                ctx.startActivity(i)
             }
             "emergency" -> Phone.emergency(ctx, rules.emergencyNumber)
             "pin" -> { val g = grownUp(s("code")); reply("pin", g.first, g.second) }
@@ -580,6 +667,16 @@ object Kids {
             when (s("what")) {
                 "bedtime" -> { gate.withLock { engine.skipBedtime(now(), mins ?: 30); store.saveState(engine.state) }; toast("Open for ${mins ?: 30} minutes. Bedtime comes back after."); return }
                 "update" -> { toast(installer.updateNow()); return }
+                // Android's "Modify system settings" for Family Screen Warden: auto-rotate (and brightness on a quick-install phone).
+                "rotate" -> {
+                    if (Sound.canRotate) { Sound.setRotation(true); toast("The screen turns with the phone now."); return }
+                    gate.withLock { engine.state.settingsUntilMs = engine.trueNow(now()) + 3 * 60_000L; store.saveState(engine.state) }
+                    lastEnforced = ""
+                    enforce(gate.withLock { engine.status(now(), offline) })
+                    runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    toast("Switch on “Allow modifying system settings”, then press Back. The screen will turn with the phone.")
+                    return
+                }
                 "play" -> {
                     val pm = rules.playMinutes
                     gate.withLock { engine.state.playUntilMs = engine.trueNow(now()) + pm * 60_000L; store.saveState(engine.state) }
@@ -632,4 +729,9 @@ object Kids {
         return snap?.phone?.contacts?.any { (st.state != "locked" || it.always) && Phone.same(it.phone, number) } == true
     }
     val lockedNow: Boolean get() = engine.status(now(), offline).state == "locked"
+    fun statusNow() = engine.status(now(), offline)
+    /** The launcher page shows the newest state (texts arrived or were read). */
+    /** The phone was unlocked after a restart: look at the apps again, put the rules back, check in. */
+    fun unlocked() { apps.invalidate(); reapply(); syncSoon(); scope.launch { refreshLauncher() }; refreshPage() }
+    fun refreshPage() { page?.let { p -> scope.launch { p(pageState()) } } }
 }

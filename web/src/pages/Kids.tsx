@@ -8,7 +8,7 @@ import { Card, Confirm, ErrorBox, ICON, Icon, Loading, PageHead, Progress, Switc
 import { KID_COLORS, safeColor, textOn } from '../lib/color';
 import { formatClockShort, formatLimitOption, formatMinutes, joinList, possessive } from '../lib/format';
 import { FirstRun } from './Dashboard';
-import { KidSections } from './KidPhone';
+import { KidSections } from '../components/KidNav';
 
 const DAY_LIMITS = [30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360, 480];
 const APP_LIMITS = [15, 30, 45, 60, 90, 120, 180];

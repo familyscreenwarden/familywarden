@@ -17,8 +17,10 @@ export interface Config {
   billingEnabled: boolean;
   /** Secret GitHub Actions sends to publish a new kids' app (empty = publishing is off). */
   publishToken: string;
-  /** Folder for files: published app versions, uploaded APKs, photos from texts. */
+  /** Folder for files: published app versions, uploaded APKs, photos from texts, kids' photos and videos. */
   dataDir: string;
+  /** How much room one kid's photos and videos may take, in bytes. */
+  kidMediaQuotaBytes: number;
 }
 
 function flag(env: NodeJS.ProcessEnv, key: string): boolean {
@@ -47,6 +49,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const from = str(env, 'MAIL_FROM_EMAIL');
   const ses = region && accessKeyId && secretAccessKey && from ? { region, accessKeyId, secretAccessKey, from } : null;
   const trustProxy = Number(str(env, 'TRUST_PROXY') || '0');
+  const quotaMb = Number(str(env, 'KID_MEDIA_QUOTA_MB') || '5120');
+  if (!Number.isFinite(quotaMb) || quotaMb < 1 || quotaMb > 1024 * 1024) throw new Error('KID_MEDIA_QUOTA_MB must be a number of megabytes, 1 or more.');
   return {
     databaseUrl,
     port,
@@ -63,5 +67,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     billingEnabled: flag(env, 'BILLING_ENABLED'),
     publishToken: str(env, 'PUBLISH_TOKEN'),
     dataDir: path.resolve(str(env, 'DATA_DIR') || path.resolve(__dirname, '..', 'data')),
+    kidMediaQuotaBytes: Math.floor(quotaMb * 1024 * 1024),
   };
 }

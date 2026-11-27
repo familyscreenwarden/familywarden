@@ -29,6 +29,8 @@ export function RequestRow({ request, onDone }: { request: KidRequest; onDone: (
           <span className={`pill ${copy.tagClass}`}>{copy.tag}</span>
         </div>
         <div style={{ fontSize: 15, overflowWrap: 'anywhere' }}>{copy.text}</div>
+        {copy.note && <div className="small muted" style={{ overflowWrap: 'anywhere', marginTop: 4 }}>{copy.note}</div>}
+        {request.kind === 'contact' && <div className="tiny muted" style={{ marginTop: 4 }}>Allow lets {request.kidName} text and call this number, but not at bedtime, when time is up or while the phone is locked.</div>}
       </div>
       <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void decide(true)}
         aria-label={`${copy.yes}: ${copy.text}`}>{copy.yes}</button>

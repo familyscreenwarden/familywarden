@@ -1,14 +1,21 @@
 /**
  * Demo data: one family (demo@example.com) with two kids, three devices, apps, contacts,
- * a week of usage, two waiting requests, a few blocked sites, chores and family chat.
+ * a week of usage, waiting requests, a few blocked sites, chores, family chat, and, for the kid with a phone,
+ * texts, photos and videos (only when a data folder is given, because they need files).
  * Safe to run again: it removes the demo family first and builds it fresh.
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
 import type { PoolClient } from 'pg';
 import { loadConfig } from './config';
 import { sha256Hex, randomToken } from './crypto';
 import { createPool, migrate, withTransaction } from './db';
+import { mediaFile } from './files';
+import { kidMediaFile, shareToken, shareTokenHash } from './media';
 import { addDays, localTime } from './rules';
+import { DEMO_WEBM_BASE64 } from './seed-media';
 
 export const DEMO_EMAIL = 'demo@example.com';
 const TIMEZONE = 'America/Denver';
@@ -30,12 +37,57 @@ interface SeedApp {
   limit?: number;
 }
 
-export async function seed(databaseUrl: string): Promise<void> {
+/** A small picture for the demo: two colours fading into each other with a lighter disc, as a real PNG file. */
+export function demoPng(width: number, height: number, from: [number, number, number], to: [number, number, number]): Buffer {
+  const rows = Buffer.alloc((width * 3 + 1) * height);
+  const cx = width * 0.7;
+  const cy = height * 0.3;
+  const radius = Math.min(width, height) * 0.16;
+  for (let y = 0; y < height; y++) {
+    const line = y * (width * 3 + 1);
+    for (let x = 0; x < width; x++) {
+      const t = (x / width + y / height) / 2;
+      const disc = Math.hypot(x - cx, y - cy) < radius ? 60 : 0;
+      for (let c = 0; c < 3; c++) rows[line + 1 + x * 3 + c] = Math.min(255, Math.round((from[c] ?? 0) * (1 - t) + (to[c] ?? 0) * t) + disc);
+    }
+  }
+  const chunk = (type: string, data: Buffer): Buffer => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(zlib.crc32(body) >>> 0, body.length + 4);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+export interface SeedFiles {
+  /** DATA_DIR: where the demo photos and videos are written. */
+  dataDir: string;
+  /** SESSION_SECRET of the server that will serve the demo, so the demo share link works there. */
+  sessionSecret: string;
+  publicUrl: string;
+}
+
+export async function seed(databaseUrl: string, files?: SeedFiles): Promise<void> {
   const pool = createPool(databaseUrl);
+  const toWrite: Array<{ file: string; data: Buffer }> = [];
+  let demoLink = '';
   try {
     await migrate(pool);
     await withTransaction(pool, async (db) => {
       await db.query('DELETE FROM login_tokens WHERE email = $1', [DEMO_EMAIL]);
+      const before = await db.query<{ id: string }>('SELECT id FROM accounts WHERE email = $1', [DEMO_EMAIL]);
+      const oldPics = await db.query<{ id: string }>('SELECT m.id FROM text_media m JOIN accounts a ON a.id = m.account_id WHERE a.email = $1', [DEMO_EMAIL]);
+      if (files) {
+        for (const a of before.rows) fs.rmSync(path.join(files.dataDir, 'kid-media', a.id), { recursive: true, force: true });
+        for (const m of oldPics.rows) fs.rmSync(mediaFile(files.dataDir, m.id), { force: true });
+      }
       await db.query('DELETE FROM accounts WHERE email = $1', [DEMO_EMAIL]); // cascades to everything the family owns
 
       const accountId = await one(
@@ -176,6 +228,75 @@ export async function seed(databaseUrl: string): Promise<void> {
            ($1, $3, 'I finished my homework', now() - interval '40 minutes')`,
         [accountId, ava, max],
       );
+      // ---- texts on Ava's phone: family, a friend, a number that is not on the list, a friend she asks for ----
+      // (With the photos and videos below, these need files: they are only made when a data folder is given.)
+      if (files) {
+        await db.query("INSERT INTO contacts (account_id, kid_id, name, phone, can_call, can_text, always) VALUES ($1, $2, 'Zoe', '555 014 0164', false, true, false)", [accountId, ava]);
+        await db.query(
+          `INSERT INTO requests (account_id, kid_id, device_id, kind, detail, identifier, phone, note, created_at)
+           VALUES ($1, $2, $3, 'contact', 'Lily', '5550142290', '555-014-2290', 'She is in my class', now() - interval '25 minutes')`,
+          [accountId, ava, avaPhone],
+        );
+        const MOM = '5550100101';
+        const DAD = '5550100102';
+        const ZOE = '5550140164';
+        const STRANGER = '5550197733';
+        const text = (phoneId: string, parts: string[], dir: 'in' | 'out', from: string | null, body: string, ago: string, status = 'shown', media: Array<{ id: string; type: string }> = []): Promise<unknown> =>
+          db.query(
+            `INSERT INTO texts (account_id, kid_id, device_id, phone_id, thread, participants, dir, from_num, body, media, status, at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() - $12::interval)`,
+            [accountId, ava, avaPhone, phoneId, [...parts].sort().join(','), [...parts].sort(), dir, from, body, JSON.stringify(media), status, ago],
+          );
+        await text('t1', [MOM], 'in', MOM, 'Pick you up at 3 today', '5 hours');
+        await text('t2', [MOM], 'out', null, 'Ok! Can Zoe come over after?', '4 hours 58 minutes');
+        await text('t3', [MOM], 'in', MOM, 'Sure, if her mom says yes.', '4 hours 55 minutes');
+        await text('t4', [MOM], 'out', null, 'Look what I drew', '2 hours', 'shown', [{ id: 'p1', type: 'image/png' }]);
+        await text('t5', [MOM], 'in', MOM, 'I love it! Put it on the fridge.', '1 hour 55 minutes');
+        await text('t6', [MOM, DAD], 'in', DAD, 'Who wants tacos tonight?', '3 hours');
+        await text('t7', [MOM, DAD], 'out', null, 'Me!!', '2 hours 59 minutes');
+        await text('t8', [MOM, DAD], 'in', MOM, 'Tacos it is. Dinner at six.', '2 hours 50 minutes');
+        await text('t9', [ZOE], 'in', ZOE, 'Did you finish the math sheet?', '1 day 2 hours');
+        await text('t10', [ZOE], 'out', null, 'Almost. Number 7 is hard', '1 day 1 hour');
+        await text('t11', [ZOE], 'in', ZOE, 'Good night!', '20 hours', 'waiting');
+        await text('t12', [STRANGER], 'in', STRANGER, 'hey is this ava? its jake from the bus', '35 minutes', 'held');
+        const picId = await one(
+          db,
+          `INSERT INTO text_media (account_id, kid_id, device_id, phone_msg_id, phone_media_id, type, size) VALUES ($1, $2, $3, 't4', 'p1', 'image/png', $4) RETURNING id`,
+          [accountId, ava, avaPhone, 1],
+        );
+        const drawing = demoPng(360, 270, [251, 191, 36], [248, 113, 113]);
+        await db.query('UPDATE text_media SET size = $2 WHERE id = $1', [picId, drawing.length]);
+        toWrite.push({ file: mediaFile(files.dataDir, picId), data: drawing });
+        await db.query("INSERT INTO blocked_numbers (account_id, kid_id, num, phone) VALUES ($1, $2, '5550199000', '(555) 019-9000')", [accountId, ava]);
+
+        // ---- photos, videos and a movie from Ava's phone ----
+        const clip = Buffer.from(DEMO_WEBM_BASE64, 'base64');
+        const shots: Array<{ phoneId: string; kind: 'photo' | 'video' | 'movie'; title: string; ago: string; data: Buffer; type: string; seconds: number; deleted?: boolean; shared?: boolean }> = [
+          { phoneId: 'mov-1', kind: 'movie', title: 'Lego heist', ago: '3 hours', data: clip, type: 'video/webm', seconds: 3, shared: true },
+          { phoneId: 'cam-7', kind: 'photo', title: 'Our dog Pickles', ago: '5 hours', data: demoPng(480, 360, [52, 211, 153], [79, 97, 184]), type: 'image/png', seconds: 0 },
+          { phoneId: 'cam-6', kind: 'photo', title: '', ago: '1 day 3 hours', data: demoPng(360, 480, [111, 130, 222], [251, 113, 133]), type: 'image/png', seconds: 0 },
+          { phoneId: 'vid-2', kind: 'video', title: 'Trampoline flip', ago: '1 day 6 hours', data: clip, type: 'video/webm', seconds: 3 },
+          { phoneId: 'cam-5', kind: 'photo', title: 'Sunset at the lake', ago: '2 days', data: demoPng(480, 320, [251, 191, 36], [31, 111, 86]), type: 'image/png', seconds: 0 },
+          { phoneId: 'cam-4', kind: 'photo', title: '', ago: '3 days 4 hours', data: demoPng(400, 400, [45, 212, 191], [20, 27, 63]), type: 'image/png', seconds: 0, deleted: true },
+          { phoneId: 'cam-3', kind: 'photo', title: 'My Lego city', ago: '6 days', data: demoPng(480, 360, [248, 113, 113], [79, 97, 184]), type: 'image/png', seconds: 0 },
+        ];
+        for (const shot of shots) {
+          const id = crypto.randomUUID();
+          const nonce = shot.shared ? crypto.randomBytes(18).toString('base64url') : null;
+          const token = nonce ? shareToken(files.sessionSecret, id, nonce) : null;
+          await db.query(
+            `INSERT INTO kid_media (id, account_id, kid_id, device_id, phone_id, kind, title, type, size, duration_sec, at, created_at, deleted_on_phone_at,
+                                    share_token_hash, share_nonce, share_expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now() - $11::interval, now() - $11::interval,
+                     CASE WHEN $12 THEN now() - interval '1 day' END, $13, $14, CASE WHEN $13::text IS NOT NULL THEN now() + interval '29 days' END)`,
+            [id, accountId, ava, avaPhone, shot.phoneId, shot.kind, shot.title, shot.type, shot.data.length, shot.seconds, shot.ago, shot.deleted === true,
+              token ? shareTokenHash(token) : null, token ? nonce : null],
+          );
+          toWrite.push({ file: kidMediaFile(files.dataDir, accountId, ava, id), data: shot.data });
+          if (token) demoLink = `${files.publicUrl}/m/${token}`;
+        }
+      }
+
       const blocked: Array<[string, string, string, string]> = [
         [max, maxPc, 'coolmathgames.com', '3 hours'],
         [max, maxPc, 'twitch.tv', '1 day 2 hours'],
@@ -194,13 +315,20 @@ export async function seed(databaseUrl: string): Promise<void> {
         ]);
       }
     });
+    // The rows are in: now the files they point at.
+    for (const f of toWrite) {
+      fs.mkdirSync(path.dirname(f.file), { recursive: true });
+      fs.writeFileSync(f.file, f.data);
+    }
+    if (demoLink) console.log(`Demo share link (works on a server with the same SESSION_SECRET): ${demoLink}`);
   } finally {
     await pool.end();
   }
 }
 
 if (require.main === module) {
-  seed(loadConfig().databaseUrl)
+  const config = loadConfig();
+  seed(config.databaseUrl, { dataDir: config.dataDir, sessionSecret: config.sessionSecret, publicUrl: config.publicUrl })
     .then(() => {
       console.log(`Demo family ready. Sign in as ${DEMO_EMAIL} (start the server with DEV_LINKS=1 to get the link in the response).`);
     })

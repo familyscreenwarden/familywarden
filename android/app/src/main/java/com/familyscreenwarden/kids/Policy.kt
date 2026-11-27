@@ -40,10 +40,15 @@ class Policy(context: Context) {
         dpm.addPersistentPreferredActivity(admin, home, ComponentName(ctx, LauncherActivity::class.java))
         dpm.setUninstallBlocked(admin, ctx.packageName, true)
         for (p in listOf(Manifest.permission.CALL_PHONE, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_CALL_LOG, Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS) + (if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()))
+            Manifest.permission.READ_CALL_LOG, Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS,
+            Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_MMS, Manifest.permission.RECEIVE_WAP_PUSH, Manifest.permission.READ_PHONE_NUMBERS,
+            Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO) +
+            (if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_IMAGES) else listOf(Manifest.permission.READ_EXTERNAL_STORAGE)))
             dpm.setPermissionGrantState(admin, ctx.packageName, p, DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
         // Family Screen Warden is the phone's call app: its call screen with family names (Android 14+; older phones ask at setup).
         if (Build.VERSION.SDK_INT >= 34) runCatching { dpm.setDefaultDialerApplication(ctx.packageName) }
+        // And its texting app (the kids' texts: family and friends a grown-up said yes to; Android 10+).
+        if (Build.VERSION.SDK_INT >= 29) runCatching { dpm.setDefaultSmsApplication(admin, ctx.packageName) }
         // What Google Play and Google's services need: the clock and time zone set by the network, location on.
         if (Build.VERSION.SDK_INT >= 30) {
             runCatching { dpm.setAutoTimeEnabled(admin, true) }
@@ -160,6 +165,15 @@ class Policy(context: Context) {
         dpm.setApplicationRestrictions(admin, "com.android.chrome", b)
     }
 
-    fun lockNow() = owner("lock") { dpm.lockNow() }
-    fun reboot() = owner("reboot") { dpm.reboot(admin) }
+    /** Brightness, screen timeout (the only system settings Android lets a device owner change). */
+    fun systemSetting(key: String, value: String): Boolean = isOwner && runCatching { dpm.setSystemSetting(admin, key, value); true }.getOrElse { Log.w("ScreenWarden", "setting $key: ${it.message}"); false }
+
+    /** Screen off. Works for the device owner (full lock-down) or an active device admin. False: Android said no. */
+    fun lockNow(): Boolean = runCatching { dpm.lockNow(); true }.getOrElse { Log.w("ScreenWarden", "lock: ${it.message}"); false }
+
+    /** Restart. Only the device owner (full lock-down) can, and not during a call. Null: restarting; else why not. */
+    fun reboot(): String? {
+        if (!isOwner) return "To restart, hold the phone's side button. (Family Screen Warden can only restart phones set up with Full lock-down.)"
+        return try { dpm.reboot(admin); null } catch (e: IllegalStateException) { "Can't restart during a call." } catch (e: Exception) { Log.w("ScreenWarden", "reboot: ${e.message}"); "The phone didn't restart. Hold the side button instead." }
+    }
 }

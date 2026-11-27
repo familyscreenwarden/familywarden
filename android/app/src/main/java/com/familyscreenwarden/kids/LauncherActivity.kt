@@ -73,6 +73,8 @@ class LauncherActivity : ComponentActivity() {
         Kids.page = { msg -> web.post { web.evaluateJavascript("window.__swReceive && window.__swReceive($msg)", null) } }
         // During a call the launcher (with Answer / Hang up) may show over the phone's lock screen; never otherwise.
         Kids.onCall = { on -> runOnUiThread { setShowWhenLocked(on); setTurnScreenOn(on) } }
+        Kids.onBrightness = { runOnUiThread { applyLook() } }
+        applyLook()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { web.evaluateJavascript("document.querySelector('.ov.show') && document.querySelector('[data-close]')?.click()", null) }
@@ -85,6 +87,7 @@ class LauncherActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::web.isInitialized) applyLook()
         Kids.atHome()
         if (!::web.isInitialized) return
         // Lock-task mode: the home screen can't be left for apps that aren't allowed.
@@ -93,6 +96,12 @@ class LauncherActivity : ComponentActivity() {
             runCatching { startLockTask() }.onFailure { Log.w(Kids.TAG, "lock task: ${it.message}") }
         }
         web.evaluateJavascript("window.__swReceive && window.dispatchEvent(new Event('focus'))", null)
+    }
+
+    /** Sound and screen: text size, and the app's own brightness when the phone's can't be changed. */
+    private fun applyLook() {
+        web.settings.textZoom = Sound.textZoom
+        window.attributes = window.attributes.apply { screenBrightness = Sound.windowBrightness.let { if (it < 0) -1f else it } }
     }
 
     override fun onDestroy() {

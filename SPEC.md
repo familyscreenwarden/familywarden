@@ -135,7 +135,7 @@ Billing
 
 ## Config (env)
 
-`DATABASE_URL`, `PORT` (3000), `PUBLIC_URL` (e.g. `https://app.familyscreenwarden.com`), `SESSION_SECRET`, `DEV_LINKS`, `AWS_SES_REGION`, `AWS_SES_ACCESS_KEY_ID`, `AWS_SES_SECRET_ACCESS_KEY`, `MAIL_FROM_EMAIL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BILLING_ENABLED`, `PUBLISH_TOKEN`, `DATA_DIR` (the last three: see "Android phones, chores and the kid-device API"). Secrets never go in the repo: ship `.env.example` only.
+`DATABASE_URL`, `PORT` (3000), `PUBLIC_URL` (e.g. `https://app.familyscreenwarden.com`), `SESSION_SECRET`, `DEV_LINKS`, `AWS_SES_REGION`, `AWS_SES_ACCESS_KEY_ID`, `AWS_SES_SECRET_ACCESS_KEY`, `MAIL_FROM_EMAIL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BILLING_ENABLED`, `PUBLISH_TOKEN`, `DATA_DIR`, `KID_MEDIA_QUOTA_MB` (the last four: see "Android phones, chores and the kid-device API" and "Kids' photos, videos and texts"). Secrets never go in the repo: ship `.env.example` only.
 
 
 ## Android phones, chores and the kid-device API
@@ -222,3 +222,49 @@ New tables: `usage_seconds` (device, kid, day, app_key, seconds), `chores`, `cho
 ### Config
 
 `BILLING_ENABLED` (see above), `PUBLISH_TOKEN` (32+ characters; empty = publishing off), `DATA_DIR` (default `server/data`, `/data` in Docker: published app versions, uploaded APKs, photos from texts).
+
+
+## Kids' photos, videos and texts
+
+Added for the app's Camera, My photos, Movie Maker and its own Texts (with picture texts). This is children's photos,
+videos and messages, so the rules are strict: every parent route is scoped to the signed-in family (another family
+gets 404, a signed-out visitor 401); a phone only reaches what that same phone uploaded; a share link shows exactly
+one item; nothing is ever listed without a sign-in. `server/test/media.test.ts` proves each of these.
+
+### The phone (its token)
+
+Both raw uploads must carry `X-FSW-Upload: 1` (400 without it), the same marker the console sends with an APK.
+
+- `POST /api/android/media`: the body is the file. Headers: `Content-Type` (`image/jpeg`, `image/png`, `video/webm`, `video/mp4`), `X-Media-Id` (the phone's own id for it, at most 64 characters), `X-Media-Kind` (`photo` | `video` | `movie`), `X-Media-Title` (UTF-8 then base64, may be empty; kept as one line of at most 120 characters), `X-Media-At` (milliseconds), `X-Media-Duration` (whole seconds). → `201 {ok, id}`; the same `X-Media-Id` again → `200 {ok, id}`. 415: another type, or a file whose first bytes are not what its type says (the phone does not try that file again). 413: over 200 MB. 507: the kid's room is used up (the phone tries again later). 400: a header is missing or kind and type disagree. 429: more than 300 uploads an hour.
+- `POST /api/android/media/:id/deleted` (`:id` = the `X-Media-Id`) → `{ok:true}`: the kid deleted it on the phone; the copy here stays, marked. 404 when this phone never uploaded that id.
+- `POST /api/android/media/:id/link` → `{link: PUBLIC_URL + '/m/<token>'}`. The same link again while it lasts; every ask gives it 30 more days. 404 when this phone never uploaded that id (the app then uploads and asks again).
+- `POST /api/android/media/:id/family-screen` → `200 {status:'unavailable', message}`: there is no shared family screen in this product; the app shows the message.
+- `POST /api/android/text-media/:msgId/:mediaId`: a picture, clip or sound from a text (8 MB). Only the types a picture text carries (JPEG, PNG, GIF, WebP, BMP, HEIC; MP4, 3GPP, WebM, QuickTime; AMR, MP3, AAC, Ogg, WAV), checked by the first bytes where the type has a signature. 415 otherwise; 507 past 1 GB per kid.
+- `POST /api/android/friend` `{name, phone, note?}`: `note` (200 characters) and the number as typed are kept with the request and shown to the parent.
+- `POST /api/warden/sync`: `texts` in and `texting` out, as listed above; nothing new in the launcher answers. Sound, screen and rotation settings live on the phone only; the server has no part in them.
+
+### Anyone with a link
+
+- `GET /m/<token>` → a small page (the Family Screen Warden look, `noindex`, `no-store`) with the kid's first name, the title, the date and that one photo or video. `GET /m/<token>/file` → the file (Range works). A wrong, ended or removed link → 404. The token is 43 URL-safe characters (256 bits). Only its SHA-256 and a nonce are stored: the token is HMAC-SHA256(`SESSION_SECRET`, item id + nonce), so the same link can be given again without keeping it. A link ends after 30 days, when a parent ends it, when the item is deleted or expires, and when the kid or family is removed.
+
+### Parents (cookie session)
+
+- `GET /api/kids/:id/media` → `{keepDays:90, linkDays:30, usedBytes, quotaBytes, items:[{id, kind, title, at, durationSec, size, type, url:'/api/media/<id>/file', deviceName, deletedOnPhone, linkShared, linkExpiresAt}]}` (newest first, 1000 at most).
+- `GET /api/media/:id/file[?download=1]` → the file (Range; `download=1` sends it as an attachment). `DELETE /api/media/:id` → gone, file and link too. `DELETE /api/media/:id/link` → the link stops working.
+- Texts: the routes listed under "Parent API additions". A friend request (`kind: contact`) also carries `note` and `phone`.
+- Files from phones are only ever sent as data: a fixed `Content-Type` from the server's own list (anything else as `application/octet-stream`, attachment), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`.
+
+### Storage, limits, clean-up
+
+- Photos and videos: `DATA_DIR/kid-media/<account id>/<kid id>/<item id>`. Pictures from texts: `DATA_DIR/text-media/<id>`. File and folder names are ids the server made; nothing a phone sends becomes part of a path.
+- Per file 200 MB (photos and videos), 8 MB (pictures in texts). Per kid `KID_MEDIA_QUOTA_MB` (default 5120 = 5 GB) of photos and videos, and 1 GB of pictures in texts.
+- Copies are kept 90 days from the day they arrived (texts: 90 days from the text's time).
+- Removing a kid removes that kid's rows, files and links at once. Housekeeping (every 10 minutes) removes expired copies and sweeps files nobody owns: folders of kids or families that are gone (however they were removed), files without a row, half uploads. Files younger than an hour are left alone.
+
+### Console
+
+Each kid has four pages: Time, apps and websites; Phone and chores; Texts (`/kids/:id/texts`: friend requests, held texts with "Add as a friend", "Block number" and "Delete", the chats to read, who the kid can text, blocked numbers); Photos and videos (`/kids/:id/photos`: a grid with All / Photos / Videos / Movies, room used, a viewer with Download, End the link and Delete).
+
+### Table (migration `003_kid_media`)
+
+`kid_media`: id, account_id, kid_id, device_id (null once the phone is removed), phone_id, kind, title, type, size, duration_sec, at, created_at, deleted_on_phone_at, share_token_hash, share_nonce, share_expires_at; unique (device_id, phone_id). New columns `requests.note`, `requests.phone`.

@@ -354,4 +354,36 @@ export const migrations: Migration[] = [
       CREATE INDEX time_codes_kid_idx ON time_codes (account_id, kid_id, created_at DESC);
     `,
   },
+  {
+    id: '003_kid_media',
+    sql: `
+      -- Photos, videos and movies a kid made with the phone's Camera and Movie Maker, copied here for the parents
+      -- (kept 90 days). The file is DATA_DIR/kid-media/<account>/<kid>/<id>. A share link's token is never stored:
+      -- only its hash, and a nonce to work the same token out again.
+      CREATE TABLE kid_media (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
+        phone_id text NOT NULL,
+        kind text NOT NULL CHECK (kind IN ('photo','video','movie')),
+        title text NOT NULL DEFAULT '',
+        type text NOT NULL CHECK (type IN ('image/jpeg','image/png','video/webm','video/mp4')),
+        size bigint NOT NULL CHECK (size > 0),
+        duration_sec integer NOT NULL DEFAULT 0 CHECK (duration_sec >= 0),
+        at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        deleted_on_phone_at timestamptz,
+        share_token_hash text UNIQUE,
+        share_nonce text,
+        share_expires_at timestamptz,
+        UNIQUE (device_id, phone_id)
+      );
+      CREATE INDEX kid_media_kid_idx ON kid_media (account_id, kid_id, at DESC);
+      CREATE INDEX kid_media_created_idx ON kid_media (created_at);
+
+      -- "Ask to add a friend": what the kid wrote about the friend, and the number as the kid typed it.
+      ALTER TABLE requests ADD COLUMN note text, ADD COLUMN phone text;
+    `,
+  },
 ];

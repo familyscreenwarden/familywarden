@@ -38,6 +38,8 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Kids.init(context)
         KidsService.start(context)
+        // BOOT_COMPLETED comes once the phone is unlocked: everything can be read now.
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_USER_UNLOCKED) Kids.unlocked()
     }
 }
 

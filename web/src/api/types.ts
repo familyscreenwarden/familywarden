@@ -57,6 +57,9 @@ export interface KidRequest {
   minutes: number | null;
   detail: string | null;
   identifier?: string | null;
+  /** A friend request only: what the kid wrote about the friend, and the number as the kid typed it. */
+  note?: string | null;
+  phone?: string | null;
   status: RequestStatus;
   createdAt: string;
   decidedAt?: string | null;
@@ -310,4 +313,30 @@ export interface ChatMessage {
   color: string | null;
   text: string;
   at: string;
+}
+
+/** A photo, video or movie from a kid's phone (its Camera and Movie Maker). */
+export type MediaKind = 'photo' | 'video' | 'movie';
+export interface KidMediaItem {
+  id: string;
+  kind: MediaKind;
+  title: string;
+  at: string;
+  durationSec: number;
+  size: number;
+  type: string;
+  /** Where the console reads the file from (the signed-in family only). */
+  url: string;
+  deviceName: string | null;
+  deletedOnPhone: boolean;
+  /** The kid made a link for it that still works. */
+  linkShared: boolean;
+  linkExpiresAt: string | null;
+}
+export interface KidMedia {
+  keepDays: number;
+  linkDays: number;
+  usedBytes: number;
+  quotaBytes: number;
+  items: KidMediaItem[];
 }

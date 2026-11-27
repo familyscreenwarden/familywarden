@@ -242,3 +242,47 @@ dialog.dialog::backdrop { background: rgba(2, 4, 12, 0.7); }
 /* Cards in a grid may shrink below their content's natural width (long rows wrap instead of pushing the card wide). */
 .grid-300 > *, .grid-260 > * { min-width: 0; }
 .swatches { flex-wrap: wrap; }
+
+/* ---- A kid's texts and photos ---- */
+.pill-dark { background: rgba(4, 6, 15, 0.82); color: #eef1fb; }
+.notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.tab-filter { cursor: pointer; padding: 0 14px; gap: 8px; }
+.tab-filter.on { background: var(--peri); color: #fff; }
+.tab-count { font-size: 12px; color: var(--muted); }
+.tab-filter.on .tab-count { color: #fff; }
+.media-room { flex: 0 1 220px; min-width: 160px; display: flex; flex-direction: column; gap: 6px; }
+.media-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+.media-tile { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #000; color: #fff; cursor: pointer; font: inherit; text-align: left; }
+.media-tile:hover { border-color: var(--control); }
+.media-tile:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.media-tile img, .media-tile video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.media-play { position: absolute; inset: 0; margin: auto; width: 44px; height: 44px; border-radius: 50%; background: rgba(4, 6, 15, 0.7); display: flex; align-items: center; justify-content: center; }
+.media-tags { position: absolute; left: 6px; top: 6px; right: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.media-caption { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 8px 6px; background: linear-gradient(rgba(4, 6, 15, 0), rgba(4, 6, 15, 0.88)); display: flex; flex-direction: column; }
+.media-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-caption .tiny { color: #c9d1f2; }
+dialog.dialog.dialog-media { max-width: min(820px, calc(100vw - 24px)); width: 100%; }
+.media-full { display: block; width: 100%; max-height: min(64vh, 620px); object-fit: contain; background: #000; border-radius: 8px; margin: 4px 0 10px; }
+.texts-panes { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.thread-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: min(64vh, 600px); overflow-y: auto; }
+.thread-item { display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 56px; padding: 8px 12px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.thread-item:hover { background: var(--inset); }
+.thread-item.on { background: var(--inset); border-color: var(--control); }
+.thread-item .thread-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-view { min-width: 0; background: var(--inset); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.thread-view-head { display: flex; align-items: center; gap: 12px; }
+.thread-back { display: none; }
+.thread-view .chat-box { max-height: min(60vh, 560px); }
+.friend-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.friend-form .field { flex: 1 1 200px; }
+@media (max-width: 860px) {
+  .media-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .media-room { flex-basis: 100%; }
+  dialog.dialog.dialog-media { padding: 16px; }
+  .texts-panes { grid-template-columns: minmax(0, 1fr); }
+  .texts-panes.has-open .thread-list { display: none; }
+  .texts-panes:not(.has-open) .thread-view { display: none; }
+  .thread-back { display: inline-flex; }
+  .thread-view { padding: 10px; }
+  .thread-pick { display: none; }
+}

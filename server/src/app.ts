@@ -65,7 +65,9 @@ export function createApp(options: AppOptions): express.Express {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     res.setHeader('Content-Security-Policy', CSP);
     if (config.production) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-    if (req.path.startsWith('/api/') || req.path.startsWith('/stripe/') || req.path.startsWith('/internal/')) res.setHeader('Cache-Control', 'no-store');
+    if (req.path.startsWith('/api/') || req.path.startsWith('/stripe/') || req.path.startsWith('/internal/') || req.path.startsWith('/m/')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
     next();
   });
 
@@ -105,9 +107,11 @@ export function createApp(options: AppOptions): express.Express {
     });
   }
 
-  // Uploads whose body is a file (a photo from a phone's texts, an APK from a parent): before the JSON parser.
+  // Uploads whose body is a file (a photo from a phone's texts, a kid's photo or video, an APK from a parent):
+  // before the JSON parser.
   const compat = compatRoutes(ctx);
   app.post('/api/android/text-media/:msgId/:mediaId', compat.textMediaUpload);
+  app.post('/api/android/media', compat.mediaUpload);
   app.post('/api/apks/upload', requireAccount(ctx), requireUnlocked, apkUpload(ctx));
 
   // Device sync carries the installed-app list, so it gets a larger body allowance than the rest.
@@ -129,7 +133,7 @@ export function createApp(options: AppOptions): express.Express {
   // Everything below needs a signed-in parent. Billing stays open to locked accounts; the rest answers 402.
   app.use('/api', requireAccount(ctx));
   app.use('/api', billingRoutes(ctx));
-  app.use('/api', requireUnlocked, parentRoutes(ctx), phoneRoutes(ctx));
+  app.use('/api', requireUnlocked, parentRoutes(ctx), phoneRoutes(ctx), compat.mediaParent);
 
   app.use('/api', (_req: Request, _res: Response) => {
     throw new HttpError(404, 'That address does not exist.');
@@ -139,6 +143,12 @@ export function createApp(options: AppOptions): express.Express {
   });
   app.use('/internal', (_req: Request, _res: Response) => {
     throw new HttpError(404, 'That address does not exist.');
+  });
+
+  // A kid's photo or video shared with a link: the link itself is the key, and it shows that one item only.
+  app.use('/m', compat.watch);
+  app.use('/m', (_req: Request, res: Response) => {
+    res.status(404).json({ error: 'That address does not exist.' });
   });
 
   // The built parent console, when it is there (production). Any other path gets index.html.

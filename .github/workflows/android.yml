@@ -46,14 +46,21 @@ jobs:
       - name: Version
         id: v
         run: echo "version=$(cat android/VERSION).${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-      - name: Check the launcher page
+      - name: Check the pages (launcher, Texts, Camera and Movie Maker)
         run: |
           node --check launcher/launcher.js
           node --check launcher/android.js
-          # The launcher must work offline: nothing in it may load from the internet.
-          if grep -rnE "(src|href)=[\"']https?://|url\(['\"]?https?://|@import" launcher --include=*.html --include=*.css --include=*.js; then
-            echo "::error::The launcher page loads something from the internet (see above)."; exit 1
+          node --check android/app/src/main/assets/texts/texts.js
+          node --check android/app/src/main/assets/studio/studio.js
+          # The pages must work offline: nothing in them may load from the internet. (Addresses that end in
+          # .screenwarden are answered by the app itself: the kid's own photos and the app's files.)
+          if grep -rnE "(src|href)=[\"']https?://|url\(['\"]?https?://|@import" launcher android/app/src/main/assets --include=*.html --include=*.css --include=*.js | grep -vE "https://[a-z-]+\.screenwarden/"; then
+            echo "::error::A page loads something from the internet (see above)."; exit 1
           fi
+          # The Texts and Camera pages use the launcher's bundled fonts (the app serves launcher/fonts at /fonts/).
+          for f in $(grep -ohE "fonts/[a-z0-9-]+\.woff2" android/app/src/main/assets/*/*.css | sort -u); do
+            test -f "launcher/$f" || { echo "::error::Missing font launcher/$f"; exit 1; }
+          done
       - name: Signing key
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

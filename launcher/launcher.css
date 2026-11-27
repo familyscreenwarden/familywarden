@@ -179,7 +179,36 @@ body[data-mode="preview"] .screen{height:calc(100vh - 56px)}
 .fam-msg{padding:8px 10px;border-radius:8px;background:var(--inset);font-size:14px;user-select:text}
 .fam-msg.mine{background:transparent;border:1px solid var(--card-line)}
 .fam-msg small{color:var(--muted);font-size:12px}
-#d-family[data-mode="call"] .fam-text,#d-family[data-mode="text"] .fam-call{display:none}
+#d-family[data-mode="call"] .fam-text,#d-family[data-mode="text"] .fam-call,#d-family[data-mode="text"] .call-only{display:none}
+.fam-h{font-family:var(--head);font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.dlg p.fam-note{font-size:13px;margin-top:-8px}
+.fam-row.off{opacity:.6}
+.fam-row small{color:var(--muted);font-size:13px;min-height:44px;display:flex;align-items:center;padding:0 6px}
+.rc-list{display:flex;flex-direction:column;gap:6px}
+.rc-row{display:flex;align-items:center;gap:10px;min-height:40px;padding:6px 12px;border-radius:8px;background:var(--inset);font-size:14px}
+.rc-row b{flex:1;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc-row small{color:var(--muted);font-size:12px;white-space:nowrap}
+.rc-row.missed b{color:var(--danger)}
+
+/* ---- Sound and screen (the phone) ---- */
+.snd-modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.snd-modes .btn{padding:0 6px}
+.snd-modes .btn.on,.snd-chips .btn.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);font-weight:600}
+.snd-power{grid-template-columns:repeat(2,minmax(0,1fr))}
+.dlg p.snd-note{font-size:13px;margin-top:-4px}
+.snd-row{display:flex;align-items:center;gap:12px;min-height:44px;font-size:14px}
+.snd-row > span{flex:none;width:136px}
+.snd-row input[type=range]{flex:1;min-width:0;min-height:44px;accent-color:var(--acc)}
+.snd-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:-6px}
+.snd-row .snd-chips{margin:0;flex:1;justify-content:flex-end;flex-wrap:nowrap}
+.snd-chips .btn{min-width:48px;padding:0 10px}
+.snd-chips .btn.z1{font-size:13px}
+.snd-chips .btn.z2{font-size:16px}
+.snd-chips .btn.z3{font-size:20px}
+.snd-switch{width:56px;height:32px;border-radius:16px;background:var(--inset);border:1px solid var(--line);position:relative;flex:none;margin:6px 0}
+.snd-switch i{position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:var(--muted);transition:left .15s}
+.snd-switch.on{background:var(--acc);border-color:var(--acc)}
+.snd-switch.on i{left:27px;background:var(--acc-ink)}
 #d-family[data-mode="text"] .fam-text{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);font-weight:600}
 .callbar{display:none}
 body[data-phone="1"] .callbar.show{display:flex;flex-direction:column;gap:14px;position:fixed;left:10px;right:10px;top:10px;z-index:60;padding:16px;border-radius:10px;background:var(--card);border:1px solid var(--green);box-shadow:0 18px 50px #000c}
@@ -293,7 +322,26 @@ body[data-phone="1"] .offline{top:auto;bottom:92px;width:max-content}
 body[data-phone="1"] .lock-bottom{margin-top:auto}
 body[data-phone="1"] .fam-row .btn{padding:0 16px}
 /* the phone's bar */
-body[data-phone="1"] .phonenav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;position:fixed;left:0;right:0;bottom:0;height:81px;padding:10px 18px 18px;background:var(--bar);border-top:1px solid var(--card-line);z-index:12}
+body[data-phone="1"] .phonenav{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;position:fixed;left:0;right:0;bottom:0;height:81px;padding:10px 10px 18px;background:var(--bar);border-top:1px solid var(--card-line);z-index:12}
 .phonenav button{min-height:52px;border-radius:12px;color:var(--text);font-size:13px;position:relative;padding:0 2px}
 .phonenav button.on{background:var(--inset);color:var(--acc-soft);font-weight:600}
 .phonenav .dot{position:absolute;top:8px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.phonenav .nav-badge{position:absolute;top:2px;right:6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--warn);color:#3b2a00;font-style:normal;font-size:11px;font-weight:600;line-height:18px;text-align:center}
+.phonenav button.quiet{color:var(--warn)}
+.lock-fam > .btn{align-self:stretch}
+
+/* A phone turned sideways (the screen turns with the phone): more tiles in a row, a lower bar, cards side by side. */
+@media (orientation:landscape){
+  body[data-phone="1"] .screen{height:calc(100vh - 61px)}
+  body[data-phone="1"] .phonenav{height:61px;padding:6px max(10px,calc(50vw - 300px)) 6px}
+  body[data-phone="1"] .phonenav button{min-height:48px}
+  body[data-phone="1"] .head{padding:10px 18px 2px}
+  body[data-phone="1"] .grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+  body[data-phone="1"] .tile{height:104px}
+  body[data-phone="1"] .toast{bottom:72px}
+  body[data-phone="1"] .offline{bottom:68px}
+  body[data-phone="1"] .dlg{width:min(560px,100%)}
+  body[data-phone="1"] .lock-in{max-width:640px;padding-top:16px}
+  body[data-phone="1"] .shield.big{width:48px;height:56px}
+  body[data-phone="1"] .callbar.show{left:max(10px,calc(50vw - 280px));right:max(10px,calc(50vw - 280px))}
+}

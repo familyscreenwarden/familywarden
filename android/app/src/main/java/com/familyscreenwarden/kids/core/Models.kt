@@ -65,6 +65,15 @@ fun msIso(ms: Long): String = java.time.Instant.ofEpochMilli(ms).toString()
 )
 @Serializable data class Contact(val id: String = "", val name: String = "", val phone: String = "", val always: Boolean = true)
 @Serializable data class PhoneInfo(val rules: PhoneRules = PhoneRules(), val contacts: List<Contact> = emptyList())
+/** The texting app: friends a grown-up said yes to, friends asked about, blocked numbers, held texts a grown-up deleted. */
+@Serializable data class Friend(val id: String = "", val name: String = "", val phone: String = "")
+@Serializable data class AskedFriend(val name: String = "", val phone: String = "", val status: String = "pending")
+@Serializable data class TextingInfo(
+    val friends: List<Friend> = emptyList(),
+    val asked: List<AskedFriend> = emptyList(),
+    val blocked: List<String> = emptyList(),
+    val drop: List<String> = emptyList(),
+)
 @Serializable data class ApkInstall(val id: String = "", val name: String = "", val url: String = "", val sha256: String = "", val size: Long = 0)
 
 @Serializable data class Snapshot(
@@ -91,6 +100,7 @@ fun msIso(ms: Long): String = java.time.Instant.ofEpochMilli(ms).toString()
     val fastSync: Boolean = false,
     val phone: PhoneInfo = PhoneInfo(),
     val apkInstalls: List<ApkInstall> = emptyList(),
+    val texting: TextingInfo? = null,
     // Set by redeem answers only.
     val minutes: Int? = null,
     val appKey: String? = null,

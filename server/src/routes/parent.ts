@@ -4,6 +4,7 @@ import { appSlug, isPackageName } from '../compat/logic';
 import { randomPairingCode } from '../crypto';
 import { withTransaction } from '../db';
 import { mediaFile, removeFile } from '../files';
+import { removeKidMediaDir } from '../media';
 import { Body, HttpError, isUuid, notFound } from '../http';
 import { addDays, isClock, lastDays, localTime, statusText } from '../rules';
 import {
@@ -274,6 +275,8 @@ export function parentRoutes(ctx: Ctx): Router {
     const deleted = await pool.query('DELETE FROM kids WHERE id = $1 AND account_id = $2', [id, account(res).id]);
     if (deleted.rowCount !== 1) throw notFound('kid');
     for (const p of photos.rows) removeFile(mediaFile(ctx.config.dataDir, p.id));
+    // The kid's photos and videos go with the kid: the rows went with the delete above, the files go here.
+    removeKidMediaDir(ctx.config.dataDir, account(res).id, id);
     res.json({ ok: true });
   });
 
@@ -567,10 +570,17 @@ export function parentRoutes(ctx: Ctx): Router {
         // "Ask to add a friend" from the phone's texting app: yes makes a contact the kid can text (not call).
         const number = request.identifier ?? '';
         if (!number) throw new HttpError(400, 'That request does not say which phone number it is for.');
+        // A contact with this number that could neither be called nor texted (switched off earlier) may be texted again.
+        await db.query(
+          `UPDATE contacts SET can_text = true WHERE account_id = $1 AND kid_id = $2 AND NOT can_call AND NOT can_text
+              AND right(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $3`,
+          [acc.id, request.kid_id, number],
+        );
         await db.query(
           `INSERT INTO contacts (account_id, kid_id, name, phone, can_call, can_text, always)
            SELECT $1, $2, $3, $4, false, true, false
-            WHERE NOT EXISTS (SELECT 1 FROM contacts WHERE account_id = $1 AND kid_id = $2 AND phone = $4)`,
+            WHERE NOT EXISTS (SELECT 1 FROM contacts WHERE account_id = $1 AND kid_id = $2
+                               AND right(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $4)`,
           [acc.id, request.kid_id, request.detail || number, number],
         );
         await db.query('DELETE FROM blocked_numbers WHERE kid_id = $1 AND num = $2', [request.kid_id, number]);

@@ -1,10 +1,10 @@
 import type { ChoreApproval, KidRequest } from '../api/types';
 import { plural } from './format';
 
-export interface RequestCopy { text: string; tag: string; tagClass: string; yes: string }
+export interface RequestCopy { text: string; tag: string; tagClass: string; yes: string; /** What the kid wrote with a friend request. */ note?: string }
 
 /** The wording for one request from a kid, as on the approved dashboard. */
-export function requestCopy(r: Pick<KidRequest, 'kind' | 'kidName' | 'minutes' | 'detail'>): RequestCopy {
+export function requestCopy(r: Pick<KidRequest, 'kind' | 'kidName' | 'minutes' | 'detail'> & Pick<Partial<KidRequest>, 'note' | 'phone'>): RequestCopy {
   if (r.kind === 'time') {
     const text = r.minutes
       ? `${r.kidName} asks for ${plural(r.minutes, 'more minute', 'more minutes')}`
@@ -15,7 +15,12 @@ export function requestCopy(r: Pick<KidRequest, 'kind' | 'kidName' | 'minutes' |
     return { text: `${r.kidName} wants a new app: ${r.detail || 'unnamed app'}`, tag: 'New app', tagClass: 'pill-deep', yes: 'Allow' };
   }
   if (r.kind === 'contact') {
-    return { text: `${r.kidName} wants to text a friend: ${r.detail || 'no name'}`, tag: 'New contact', tagClass: 'pill-deep', yes: 'Allow' };
+    const copy: RequestCopy = {
+      text: `${r.kidName} wants to text a friend: ${r.detail || 'no name'}${r.phone ? ` (${r.phone})` : ''}`,
+      tag: 'New contact', tagClass: 'pill-deep', yes: 'Allow',
+    };
+    if (r.note) copy.note = `${r.kidName} says: "${r.note}"`;
+    return copy;
   }
   return { text: `${r.kidName} wants a website: ${r.detail || 'unnamed site'}`, tag: 'New site', tagClass: 'pill-deep', yes: 'Allow' };
 }
