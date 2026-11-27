@@ -42,6 +42,18 @@ export function BillingPage() {
     );
   }
 
+  if (b.billingEnabled === false) {
+    return (
+      <>
+        <PageHead title="Billing" />
+        <Card title="Your plan">
+          <div className="row"><span className="mid-num">Free</span><span className="pill pill-deep">Nothing to pay</span></div>
+          <p className="muted">Family Screen Warden is free to use right now, with unlimited kids and devices. There is no trial clock and no card is needed.</p>
+        </Card>
+      </>
+    );
+  }
+
   const daysLeft = b.trialDaysLeft ?? 0;
   const ends = dateText(b.trialEndsAt);
 

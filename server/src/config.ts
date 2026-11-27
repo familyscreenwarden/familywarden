@@ -13,6 +13,16 @@ export interface Config {
   stripeWebhookSecret: string;
   stripeApiBase: string;
   webDist: string;
+  /** The paywall. Off: no trial lock, no 402s, billing reported as off. */
+  billingEnabled: boolean;
+  /** Secret GitHub Actions sends to publish a new kids' app (empty = publishing is off). */
+  publishToken: string;
+  /** Folder for files: published app versions, uploaded APKs, photos from texts. */
+  dataDir: string;
+}
+
+function flag(env: NodeJS.ProcessEnv, key: string): boolean {
+  return ['1', 'true', 'yes', 'on'].includes(str(env, key).toLowerCase());
 }
 
 function str(env: NodeJS.ProcessEnv, key: string): string {
@@ -50,5 +60,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     stripeWebhookSecret: str(env, 'STRIPE_WEBHOOK_SECRET'),
     stripeApiBase: (str(env, 'STRIPE_API_BASE') || 'https://api.stripe.com').replace(/\/+$/, ''),
     webDist: str(env, 'WEB_DIST') || path.resolve(__dirname, '..', '..', 'web', 'dist'),
+    billingEnabled: flag(env, 'BILLING_ENABLED'),
+    publishToken: str(env, 'PUBLISH_TOKEN'),
+    dataDir: path.resolve(str(env, 'DATA_DIR') || path.resolve(__dirname, '..', 'data')),
   };
 }

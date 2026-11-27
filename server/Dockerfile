@@ -26,7 +26,10 @@ RUN npm run build && npm prune --omit=dev
 
 # ---- 3. the image that runs ----
 FROM node:22-alpine
-ENV NODE_ENV=production PORT=3000 WEB_DIST=/app/web/dist
+ENV NODE_ENV=production PORT=3000 WEB_DIST=/app/web/dist DATA_DIR=/data
+# Published app versions, uploaded APKs and photos from texts live here: mount a volume on /data to keep them.
+RUN mkdir -p /data && chown node:node /data
+VOLUME /data
 WORKDIR /app/server
 COPY --from=server /repo/server/package.json ./
 COPY --from=server /repo/server/node_modules ./node_modules

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en" data-theme="warden">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Screen Warden</title>
+<link rel="stylesheet" href="launcher.css">
+</head>
+<body>
+<!-- The shield (the Family Screen Warden logo), used wherever <svg class="shield"><use href="#shield"/></svg> appears. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="shield" viewBox="0 0 120 140">
+    <path class="sh-body" d="M60 8 L112 26 V68 C112 100 90 122 60 132 C30 122 8 100 8 68 V26 Z" fill="none" stroke="#34d399" stroke-width="9" stroke-linejoin="round"/>
+    <path d="M82 46 H46 V68 H74 V92 H38" fill="none" stroke="#34d399" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="82" cy="46" r="6" fill="#04060f" stroke="#34d399" stroke-width="4"/>
+    <circle cx="38" cy="92" r="6" fill="#04060f" stroke="#34d399" stroke-width="4"/>
+  </symbol>
+</svg>
+
+<div class="offline" id="offline">Offline. Using the last rules from your Family Screen Warden account.</div>
+
+<!-- ========== the home screen (one look; phone and desktop share it) ========== -->
+<div class="screen" id="screen">
+  <header class="head">
+    <div class="avatar" id="avatar"></div>
+    <div class="hello"><h1 id="hello">Hi</h1><p id="day"></p></div>
+    <label class="sr" for="q">Search apps and websites</label>
+    <input id="q" class="q" placeholder="Search" autocomplete="off" spellcheck="false">
+    <button class="btn icon-btn" data-act="look" title="Change the colours" aria-label="Change the colours"><span class="swatch"></span></button>
+    <svg class="shield brand" role="img" aria-label="Family Screen Warden"><use href="#shield"/></svg>
+  </header>
+
+  <div class="body" id="body">
+    <section class="card time" id="timecard">
+      <div class="time-row"><span class="lbl">Time left today</span><span class="num" id="t-left">–</span></div>
+      <div class="meter" id="t-meter" role="img" aria-label=""><i id="t-bar"></i></div>
+      <div class="time-foot"><span id="t-note"></span><span id="t-bed"></span></div>
+    </section>
+
+    <div class="main">
+      <div class="cats" id="cats"></div>
+      <div class="grid" id="grid"></div>
+      <div class="empty hidden" id="empty"><h3>Nothing found</h3><p>Not here? Ask a grown-up to add it.</p><button class="btn line-acc" data-act="ask-app">Ask for it</button></div>
+    </div>
+
+    <section class="card ask" id="askcard">
+      <h2>Ask a grown-up</h2>
+      <button class="btn line-acc p-only" data-ask="time:15">Ask for 15 more minutes</button>
+      <button class="btn line-acc d-only" data-ask="time:15">15 more minutes</button>
+      <button class="btn line-acc d-only" data-ask="time:30">30 more minutes</button>
+      <button class="btn" data-act="ask"><span class="p-only">Ask for something else</span><span class="d-only">Something else</span></button>
+    </section>
+
+    <section class="card chores" id="chorescard">
+      <h2>Earn more time <span class="tag" id="chore-mins"></span></h2>
+      <div class="chore-list" id="chores"></div>
+    </section>
+
+    <section class="card chat" id="chatcard">
+      <h2>Family chat <span class="tag hidden" id="chat-new">New</span></h2>
+      <div class="chat-list" id="chat-peek"></div>
+      <button class="btn" data-act="chat-open">Open the chat</button>
+    </section>
+
+    <section class="card today" id="todaycard">
+      <h2>Today</h2>
+      <div id="today"></div>
+    </section>
+
+    <div class="phone-more p-only">
+      <button class="btn" data-act="power-menu">Power</button>
+      <button class="btn" data-act="look">Colours</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== dialogs ========== -->
+<div class="ov" id="d-ask"><div class="dlg">
+  <h2>Ask a grown-up</h2>
+  <p>Your request goes to a parent. You'll see the answer here.</p>
+  <div class="opts">
+    <button class="btn" data-ask="time:15">15 more minutes</button>
+    <button class="btn" data-ask="time:30">30 more minutes</button>
+    <button class="btn" data-ask="app">A new app or game</button>
+    <button class="btn" data-ask="site">A website</button>
+    <button class="btn" data-act="code">I have a code</button>
+  </div>
+  <button class="btn ghost" data-close>Cancel</button>
+</div></div>
+
+<div class="ov" id="d-asktext"><div class="dlg">
+  <h2 id="d-asktext-h">Which app?</h2>
+  <p id="d-asktext-p">Type its name. A grown-up will see it.</p>
+  <input class="txt" id="d-asktext-in" maxlength="120" spellcheck="false">
+  <div class="row2"><button class="btn ghost" data-close>Cancel</button><button class="btn pri" data-act="ask-send">Send</button></div>
+</div></div>
+
+<div class="ov" id="d-chores"><div class="dlg">
+  <h2>Earn more time</h2>
+  <p id="d-chores-p">Finish a chore, a grown-up checks it, and you get more time.</p>
+  <div class="chore-list" id="d-chores-list"></div>
+  <button class="btn ghost" data-close>Close</button>
+</div></div>
+
+<div class="ov" id="d-chat"><div class="dlg">
+  <h2>Family chat</h2>
+  <div class="chat-list full" id="chat-list"></div>
+  <div class="chat-send"><label class="sr" for="chat-in">Message your family</label><input class="txt" id="chat-in" placeholder="Message your family…" maxlength="300"><button class="btn pri" data-act="chat">Send</button></div>
+  <button class="btn ghost" data-close>Close</button>
+</div></div>
+
+<div class="ov" id="d-look"><div class="dlg">
+  <h2>Pick your colours</h2>
+  <p id="d-look-p">The accent colour for your home screen.</p>
+  <div class="tsel" id="d-themes"></div>
+  <button class="btn pri" data-close>Done</button>
+</div></div>
+
+<div class="ov" id="d-pin"><div class="dlg">
+  <h2>Grown-ups only</h2>
+  <p>Type the screen PIN (or an emergency code from the parent console).</p>
+  <div class="pin" id="d-dots"></div>
+  <div class="pad" id="d-pad"></div>
+  <div class="msg bad" id="d-pin-msg"></div>
+  <button class="btn ghost" data-close>Cancel</button>
+</div></div>
+
+<div class="ov" id="d-parent"><div class="dlg">
+  <h2>Hi, grown-up</h2>
+  <p id="d-parent-p"></p>
+  <div class="opts">
+    <button class="btn" data-parent="desktop:30">Windows desktop for 30 minutes</button>
+    <button class="btn" data-parent="time:15">Add 15 minutes</button>
+    <button class="btn" data-parent="time:30">Add 30 minutes</button>
+    <button class="btn" data-parent="lock">Lock now</button>
+    <button class="btn phone-only" data-parent="play">Play Store for a few minutes (to install an app you said yes to)</button>
+    <button class="btn" data-parent="look">Change the colours</button>
+    <button class="btn" data-parent="update" id="d-parent-upd">Check for updates</button>
+  </div>
+  <button class="btn ghost" data-close>Back</button>
+</div></div>
+
+<div class="ov" id="d-code"><div class="dlg">
+  <h2>I have a code</h2>
+  <p>Type the code a grown-up gave you.</p>
+  <input class="txt" id="d-code-in" maxlength="20" spellcheck="false" inputmode="numeric">
+  <div class="msg" id="d-code-msg"></div>
+  <div class="row2"><button class="btn ghost" data-close>Cancel</button><button class="btn pri" data-act="code-send">Use it</button></div>
+</div></div>
+
+<div class="ov" id="d-power"><div class="dlg">
+  <h2 id="d-power-h">Shut down?</h2>
+  <p id="d-power-p"></p>
+  <div class="pwrcount" id="d-power-c">10</div>
+  <div class="row2"><button class="btn ghost" data-act="power-cancel">Cancel</button><button class="btn pri" id="d-power-go" data-act="power-go">Now</button></div>
+</div></div>
+
+<!-- the phone: family calls and texts (index.html?phone) -->
+<div class="ov" id="d-family"><div class="dlg">
+  <h2 id="d-family-h">Call family</h2>
+  <p>These always work, even when your time is up.</p>
+  <div class="fam-list" id="fam-list"></div>
+  <div class="fam-msgs hidden" id="fam-msgs"></div>
+  <button class="btn danger" data-act="emergency">Emergency call</button>
+  <button class="btn ghost" data-close>Close</button>
+</div></div>
+
+<div class="ov" id="d-text"><div class="dlg">
+  <h2 id="d-text-h">Text</h2>
+  <textarea class="txt" id="d-text-in" maxlength="600" rows="3" spellcheck="true"></textarea>
+  <div class="row2"><button class="btn ghost" data-close>Cancel</button><button class="btn pri" data-act="text-send">Send</button></div>
+</div></div>
+
+<div class="ov" id="d-volume"><div class="dlg">
+  <h2>Sound</h2>
+  <p id="d-volume-p"></p>
+  <input type="range" min="0" max="100" class="slider" id="d-volume-in" aria-label="Volume">
+  <div class="row2"><button class="btn" data-act="mute" id="d-mute">Mute</button><button class="btn pri" data-close>Done</button></div>
+</div></div>
+
+<div class="ov" id="d-wifi"><div class="dlg">
+  <h2>Internet</h2>
+  <p id="d-wifi-p"></p>
+  <button class="btn pri" data-close>OK</button>
+</div></div>
+
+<!-- the phone: a call in progress (Answer / Decline, then Mute / Speaker / Hang up), above everything -->
+<div class="callbar" id="callbar" role="dialog" aria-live="assertive">
+  <div class="cb-who"><span class="fam-av" id="cb-av">?</span><div><b id="cb-name">Someone</b><small id="cb-sub">is calling…</small></div></div>
+  <div class="cb-btns" id="cb-ring">
+    <button class="btn danger-fill" data-act="call-end">Decline</button>
+    <button class="btn pri" data-act="call-answer">Answer</button>
+  </div>
+  <div class="cb-btns hidden" id="cb-live">
+    <button class="btn" data-act="call-mute" id="cb-mute">Mute</button>
+    <button class="btn" data-act="call-speaker" id="cb-spk">Speaker</button>
+    <button class="btn danger-fill" data-act="call-end">Hang up</button>
+  </div>
+</div>
+
+<!-- time's up / bedtime / locked by a grown-up (on top of the home screen) -->
+<div class="lock" id="lock"><div class="lock-in">
+  <div class="lock-top">
+    <svg class="shield big" aria-hidden="true"><use href="#shield"/></svg>
+    <div class="n-clock night-only" id="n-clock"></div>
+    <h1 id="lock-h"></h1>
+    <p id="lock-p"></p>
+  </div>
+  <section class="card lock-fam hidden" id="lock-fam">
+    <h2>You can still reach family</h2>
+    <div class="fam-list" id="lock-fam-list"></div>
+    <div class="fam-msgs hidden" id="lock-fam-msgs"></div>
+  </section>
+  <div class="lock-acts day-only">
+    <button class="btn line-acc" data-ask="time:15">Ask for 15 more minutes</button>
+    <p class="note">Your request goes to a parent. They can say yes from anywhere.</p>
+    <div class="row2">
+      <button class="btn" data-act="chores" id="lock-chores">Do a chore</button>
+      <button class="btn" data-act="code">I have a code</button>
+    </div>
+  </div>
+  <div class="lock-bottom">
+    <button class="btn danger phone-only" data-act="emergency">Emergency call</button>
+    <button class="btn" data-act="lock-pin">Grown-up PIN</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<!-- ========== the bar at the bottom of a computer (its own window, always on top: index.html?bar) ========== -->
+<div class="minibar" id="bar">
+  <svg class="shield" aria-hidden="true"><use href="#shield"/></svg>
+  <button class="btn mb-home" data-act="home">Home</button>
+  <div id="bar-apps" class="bar-apps"></div>
+  <div class="mb-sp"></div>
+  <div class="mb-time" id="bar-time">–</div>
+  <button class="mb-text" data-act="wifi" id="bar-wifi">Wi-Fi on</button>
+  <button class="mb-text" data-act="volume" id="bar-vol">Sound</button>
+  <div class="mb-clock" id="bar-clock"></div>
+  <button class="btn" data-act="power-menu">Power</button>
+  <button class="btn" data-act="pin">Grown-up</button>
+</div>
+<!-- ========== the phone's bar ========== -->
+<nav class="phonenav" id="nav" aria-label="Phone">
+  <button class="on" data-act="home">Home</button>
+  <button data-act="phone-call">Call family</button>
+  <button data-act="phone-text">Text family <span class="dot hidden" id="nav-dot"></span></button>
+  <button data-act="pin">Grown-up</button>
+</nav>
+<div class="pwrmenu" id="pwrmenu">
+  <button data-power="sleep"><b>Sleep</b><small>Screen off, your apps stay open</small></button>
+  <button data-power="shutdown"><b>Shut down</b><small>Closes everything and turns the PC off</small></button>
+</div>
+
+<script src="android.js"></script>
+<script type="module" src="launcher.js"></script>
+</body>
+</html>

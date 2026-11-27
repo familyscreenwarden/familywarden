@@ -70,6 +70,9 @@ Copy `.env.example` and fill it in, or set the same names in the environment. Th
 | `STRIPE_SECRET_KEY` | for billing | Without it the billing buttons answer 503 |
 | `STRIPE_WEBHOOK_SECRET` | for billing | Signing secret of the webhook endpoint |
 | `WEB_DIST` | no | Folder with the built web app (default `../web/dist`) |
+| `BILLING_ENABLED` | no (off) | `1` switches the trial and Stripe billing on. Off: no paywall, nobody is locked |
+| `DATA_DIR` | in production | Folder for files: published app versions, uploaded APKs, photos from texts (default `./data`, `/data` in Docker). Put it on a disk that is kept |
+| `PUBLISH_TOKEN` | to publish the Android app | Secret GitHub Actions sends to `POST /internal/android/publish`. 32+ characters (`openssl rand -hex 32`) |
 
 Secrets never go in the repo.
 
@@ -94,8 +97,10 @@ TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/fsw_test npm test
 - `test/rules.test.ts`: the rule evaluation (limits, grants, free apps, bedtime, lock reasons).
 - `test/crypto.test.ts`: hashes, PINs, pairing codes, the Stripe signature check, the AWS signer.
 - `test/integration.test.ts`: the real app on a real database, end to end.
+- `test/compat.test.ts`: the pure helpers of the kid-device API (time zones, bedtime instants, chores, codes, the setup QR).
+- `test/android.test.ts`: a phone walked through setup, sync, launcher, requests, chores, chat, texts, APK pushes and updates.
 
-`npm run test:unit` runs the first two without a database. `npm run typecheck` checks source and tests.
+`npm run test:unit` runs the unit tests (rules, crypto, compat) without a database. `npm run typecheck` checks source and tests.
 
 ## Docker
 
@@ -103,7 +108,7 @@ Build from the repo root (so the web app is built into the image too):
 
 ```
 docker build -f server/Dockerfile -t family-screen-warden .
-docker run -p 3000:3000 \
+docker run -p 3000:3000 -v fsw-data:/data \
   -e DATABASE_URL=postgres://user:password@db-host:5432/fsw \
   -e PUBLIC_URL=https://app.familyscreenwarden.com \
   -e SESSION_SECRET=$(openssl rand -hex 32) \
@@ -119,7 +124,10 @@ docker run -p 3000:3000 \
 | `src/migrations.ts` | The database schema, as ordered migrations applied at start-up |
 | `src/routes/auth.ts` | Email-link sign-in, `/api/me`, account settings |
 | `src/routes/parent.ts` | Dashboard, kids, apps, contacts, devices, requests, reports |
-| `src/routes/device.ts` | Pairing, sync, kid requests, PIN check |
+| `src/routes/device.ts` | Pairing, sync, kid requests, PIN check (the simple device API) |
+| `src/routes/compat.ts`, `src/compat/logic.ts` | The kid-device API the Android app speaks (`/api/warden`, `/api/android`) |
+| `src/routes/phone.ts` | Parent routes for phones: setup QR, phone rules, chores, family chat, texts, APKs, codes |
+| `src/releases.ts`, `src/files.ts` | Publishing and serving the Android app; files under `DATA_DIR` |
 | `src/routes/billing.ts`, `src/stripe.ts` | Billing routes, Stripe calls and webhook check |
 | `src/mail.ts` | Amazon SES email, signed by hand |
 | `src/seed.ts` | Demo data |

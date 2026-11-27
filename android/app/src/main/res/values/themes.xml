@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Kids" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/ic_launcher_background</item>
+        <item name="android:statusBarColor">#04060f</item>
+        <item name="android:navigationBarColor">#070a1c</item>
+        <item name="android:colorAccent">#34d399</item>
+    </style>
+    <style name="Theme.Kids.Invisible" parent="android:Theme.Translucent.NoTitleBar" />
+</resources>

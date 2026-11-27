@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useApp } from '../app';
+import { useApp, useLoad } from '../app';
 import { errorMessage } from '../api/client';
 import { Logo } from '../components/ui';
 
@@ -13,6 +13,8 @@ export function SignIn() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<{ email: string; devLink?: string } | null>(null);
+  // Whether this server has a paywall to mention. Until it answers, neither sentence is shown.
+  const config = useLoad(() => api.config(), []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -57,7 +59,7 @@ export function SignIn() {
           <>
             <div>
               <h1>Sign in</h1>
-              <p className="muted" style={{ marginTop: 6 }}>Type your email and we will send you a sign-in link. No password needed. New here? The same form starts your 30-day free trial, no card needed.</p>
+              <p className="muted" style={{ marginTop: 6 }}>Type your email and we will send you a sign-in link. No password needed. {config.data && (config.data.billingEnabled ? ' New here? The same form starts your 30-day free trial, no card needed.' : ' New here? The same form makes your family account. It is free right now.')}</p>
             </div>
             {expired && (
               <div className="banner banner-warn" role="alert">That sign-in link has expired or was already used. Ask for a new one below.</div>

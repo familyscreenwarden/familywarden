@@ -1,0 +1,154 @@
+name: Android app
+
+# Family Screen Warden for Android: the kids' phone app (device owner). Every push that touches the app or the
+# launcher page builds it and runs its unit tests. To release it to families: Actions → "Android app" → Run workflow
+# (Publish ticked). Families' phones then update by themselves (when the screen is off), and new phones get it from
+# the setup QR code in the parent console.
+#
+# Signing: secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+#   With them: a signed release APK. Without them: an unsigned-for-release debug APK, for testing only.
+#   Phones only accept updates signed with the key they were set up with: never change the key once published.
+# Publishing: variable WARDEN_SERVER_URL (e.g. https://app.familyscreenwarden.com) and secret PUBLISH_TOKEN
+#   (the server's PUBLISH_TOKEN). It needs the signing key.
+# Version: android/VERSION (major.minor) + the run number, e.g. 1.0.12.
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'launcher/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to families now (untick to only build it)'
+        type: boolean
+        default: false
+      notes:
+        description: 'What changed'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+      - name: Version
+        id: v
+        run: echo "version=$(cat android/VERSION).${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+      - name: Check the launcher page
+        run: |
+          node --check launcher/launcher.js
+          node --check launcher/android.js
+          # The launcher must work offline: nothing in it may load from the internet.
+          if grep -rnE "(src|href)=[\"']https?://|url\(['\"]?https?://|@import" launcher --include=*.html --include=*.css --include=*.js; then
+            echo "::error::The launcher page loads something from the internet (see above)."; exit 1
+          fi
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true' }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+          elif [ "$PUBLISH" = "true" ]; then
+            echo "::error::Publishing needs the signing key secrets (ANDROID_KEYSTORE_BASE64 …): see android/README.md"; exit 1
+          else
+            echo "::warning::No signing key: building a debug APK for testing only."
+          fi
+      - name: Test and build
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ "$SIGNED" = "1" ]; then gradle --no-daemon testDebugUnitTest assembleRelease; else gradle --no-daemon testDebugUnitTest assembleDebug; fi
+          mkdir -p ../out
+          for f in app/build/outputs/apk/*/*.apk; do
+            case "$f" in *debug*) cp "$f" "../out/FamilyScreenWarden-${{ steps.v.outputs.version }}-debug.apk" ;; *) cp "$f" "../out/FamilyScreenWarden-${{ steps.v.outputs.version }}.apk" ;; esac
+          done
+          ls -lh ../out
+      - name: Signing certificate checksum
+        # The SHA-256 of the signing certificate, as URL-safe base64 without padding: the form Android's setup QR
+        # takes (PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM). It stays the same for every version signed with the
+        # same key. Read from the signed APK (apksigner), or from the keystore when apksigner isn't on the runner.
+        if: env.SIGNED == '1'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          f="out/FamilyScreenWarden-${{ steps.v.outputs.version }}.apk"
+          hex=""
+          signer=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/*/ 2>/dev/null | sort -V | tail -1)apksigner
+          if [ -x "$signer" ]; then
+            hex=$("$signer" verify --print-certs "$f" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)
+          fi
+          if [ -z "$hex" ]; then
+            hex=$(keytool -list -v -keystore "$ANDROID_KEYSTORE_FILE" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sed -n 's/^[[:space:]]*SHA256: //p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')
+          fi
+          if ! printf '%s' "$hex" | grep -qE '^[0-9a-f]{64}$'; then echo "::error::Couldn't read the signing certificate's SHA-256."; exit 1; fi
+          sig=$(python3 -c "import sys, base64; print(base64.urlsafe_b64encode(bytes.fromhex(sys.argv[1])).decode().rstrip('='))" "$hex")
+          echo "SIGNATURE_CHECKSUM=$sig" >> "$GITHUB_ENV"
+          echo "Signing certificate checksum (for the setup QR): $sig"
+      - name: Publish to families
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'
+        env:
+          WARDEN_SERVER_URL: ${{ vars.WARDEN_SERVER_URL }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          NOTES: ${{ github.event.inputs.notes }}
+        run: |
+          if [ -z "$WARDEN_SERVER_URL" ] || [ -z "$PUBLISH_TOKEN" ]; then echo "::error::Set the WARDEN_SERVER_URL variable and the PUBLISH_TOKEN secret to publish."; exit 1; fi
+          f="out/FamilyScreenWarden-${{ steps.v.outputs.version }}.apk"
+          sha=$(sha256sum "$f" | cut -d' ' -f1)
+          # The request the server's publish route takes: the APK as the body, with its version, its SHA-256 (hex)
+          # and the notes (base64) in headers; plus the signing certificate checksum for the setup QR.
+          curl -fsS --retry 3 --max-time 600 -X POST "${WARDEN_SERVER_URL%/}/internal/android/publish" \
+            -H "Authorization: Bearer $PUBLISH_TOKEN" -H "X-Version: ${{ steps.v.outputs.version }}" -H "X-Sha256: $sha" \
+            -H "X-Signature-Checksum: $SIGNATURE_CHECKSUM" \
+            -H "X-Notes: $(printf '%s' "$NOTES" | base64 -w0)" -H "Content-Type: application/octet-stream" --data-binary "@$f"
+          echo
+          echo "Published ${{ steps.v.outputs.version }} (file $sha, signing certificate $SIGNATURE_CHECKSUM)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: FamilyScreenWarden-${{ steps.v.outputs.version }}
+          path: out/*.apk
+          retention-days: 7
+
+  server-tests:
+    # The server this app talks to lives in this repo: its own tests, against a throwaway Postgres.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fsw_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Server tests
+        working-directory: server
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/fsw_test
+        run: |
+          npm ci --no-audit --no-fund
+          npm test

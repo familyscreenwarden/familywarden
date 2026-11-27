@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useApp, useLoad, useMedia } from '../app';
 import type { DashKid, Dashboard, LockReason } from '../api/types';
 import { HalfDonut, Lollipop, MiniLines, STATUS_COLOR, WeekChart } from '../components/charts';
+import { ChoreRow } from '../components/ChoreRow';
+import { useShell } from '../components/Layout';
 import { RequestRow } from '../components/RequestRow';
 import { Avatar, Card, Confirm, ErrorBox, KidPill, Loading, PageHead, Progress, StaleNote } from '../components/ui';
 import { lineColor, safeColor, textOn } from '../lib/color';
@@ -23,6 +25,8 @@ function pillText(name: string, reason: LockReason): string {
 export function DashboardPage() {
   const { api, run } = useApp();
   const dash = useLoad(() => api.dashboard(), [], 30000);
+  const chores = useLoad(() => api.choreApprovals('pending'), [], 30000);
+  const waitingChores = chores.data?.approvals ?? [];
   const [confirmPause, setConfirmPause] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const d = dash.data;
@@ -84,9 +88,10 @@ export function DashboardPage() {
         <div className="dash-right">
           <WeekCard d={d} />
           <Card title="Waiting for you" action={<Link to="/requests" className="small">All requests</Link>}>
-            {d.requests.length === 0
-              ? <p className="empty">Nothing is waiting. When a kid asks for more time or a new app, it shows up here.</p>
-              : d.requests.map((r) => <RequestRow key={r.id} request={r} onDone={dash.reload} />)}
+            {d.requests.length === 0 && waitingChores.length === 0
+              && <p className="empty">Nothing is waiting. When a kid asks for more time or a new app, or marks a chore as done, it shows up here.</p>}
+            {d.requests.map((r) => <RequestRow key={r.id} request={r} onDone={dash.reload} />)}
+            {waitingChores.map((a) => <ChoreRow key={a.id} approval={a} onDone={async () => { await Promise.all([chores.reload(), dash.reload()]); }} />)}
           </Card>
         </div>
       </div>
@@ -238,6 +243,7 @@ function BlockedCard({ d }: { d: Dashboard }) {
 }
 
 export function FirstRun() {
+  const { billingEnabled } = useShell();
   return (
     <>
       <PageHead title="Welcome to Family Screen Warden" />
@@ -251,7 +257,7 @@ export function FirstRun() {
           <Link to="/kids/new" className="btn btn-primary">Add a kid</Link>
           <Link to="/help" className="btn btn-ghost">How setup works</Link>
         </div>
-        <p className="small muted">Your 30-day free trial is running. No card needed.</p>
+        {billingEnabled && <p className="small muted">Your 30-day free trial is running. No card needed.</p>}
       </Card>
     </>
   );

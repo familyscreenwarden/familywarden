@@ -1,0 +1,11 @@
+# Build outputs and anything secret never go in the repo.
+.gradle/
+build/
+app/build/
+local.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+.idea/
+*.iml

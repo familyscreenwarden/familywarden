@@ -9,6 +9,7 @@ const NAV_MAIN = [
   { to: '/kids', label: 'Kids and rules', d: 'M8 11a3 3 0 100-6 3 3 0 000 6z M2 20c0-3 3-5 6-5s6 2 6 5 M17 11a3 3 0 100-6 M22 20c0-3-2-4.5-4-5' },
   { to: '/devices', label: 'Devices', d: 'M3 5h18v11H3z M8 20h8 M12 16v4' },
   { to: '/requests', label: 'Requests', d: 'M6 16V11a6 6 0 0112 0v5l2 2H4z M10 21h4' },
+  { to: '/chat', label: 'Family chat', d: 'M4 5h16v11H9l-5 4z' },
   { to: '/reports', label: 'Reports', d: 'M4 20V10 M10 20V4 M16 20v-7 M22 20H2' },
   { to: '/safe-browsing', label: 'Safe browsing', d: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z' },
 ] as const;
@@ -21,7 +22,7 @@ const NAV_MORE = [
 /** Pages a locked account may still open. */
 const OPEN_WHEN_LOCKED = ['/billing', '/settings', '/help'];
 
-export interface ShellContext { account: Account; reloadAccount: () => Promise<void> }
+export interface ShellContext { account: Account; reloadAccount: () => Promise<void>; billingEnabled: boolean }
 export function useShell(): ShellContext { return useOutletContext<ShellContext>(); }
 
 export function Layout() {
@@ -30,15 +31,22 @@ export function Layout() {
   const [open, setOpen] = useState(false);
   const me = useLoad(() => api.me(), []);
   const account = me.data?.account ?? null;
-  const isLocked = locked || account?.plan === 'locked';
+  // The server says whether there is a paywall at all. Off: no Billing in the menu, no "choose a plan" screen.
+  const billingEnabled = me.data?.billingEnabled !== false;
+  const isLocked = billingEnabled && (locked || account?.plan === 'locked');
 
   useEffect(() => { setOpen(false); }, [location.pathname]);
   useEffect(() => {
-    if (account) setLocked(account.plan === 'locked');
-  }, [account, setLocked]);
+    if (account) setLocked(billingEnabled && account.plan === 'locked');
+  }, [account, billingEnabled, setLocked]);
 
   const pending = useLoad(
-    async () => (account && !isLocked ? (await api.requests('pending')).requests.length : 0),
+    async () => {
+      if (!account || isLocked) return 0;
+      // Requests and chores marked as done both wait for a parent.
+      const [requests, chores] = await Promise.all([api.requests('pending'), api.choreApprovals('pending')]);
+      return requests.requests.length + chores.approvals.length;
+    },
     [account?.id, isLocked, badgeTick],
     30000,
   );
@@ -74,7 +82,7 @@ export function Layout() {
           <div id="nav-links" className={`nav-links${open ? ' open' : ''}`}>
             {NAV_MAIN.map(link)}
             <div className="nav-sep" />
-            {NAV_MORE.map(link)}
+            {NAV_MORE.filter((item) => billingEnabled || item.to !== '/billing').map(link)}
           </div>
         </nav>
         <main className="main">
@@ -82,7 +90,7 @@ export function Layout() {
           {me.error && !account && <ErrorBox message={me.error} onRetry={() => void me.reload()} />}
           {account && (showLockScreen
             ? <ChoosePlan />
-            : <Outlet context={{ account, reloadAccount: me.reload } satisfies ShellContext} />)}
+            : <Outlet context={{ account, reloadAccount: me.reload, billingEnabled } satisfies ShellContext} />)}
         </main>
       </div>
     </div>

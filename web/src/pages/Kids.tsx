@@ -8,6 +8,7 @@ import { Card, Confirm, ErrorBox, ICON, Icon, Loading, PageHead, Progress, Switc
 import { KID_COLORS, safeColor, textOn } from '../lib/color';
 import { formatClockShort, formatLimitOption, formatMinutes, joinList, possessive } from '../lib/format';
 import { FirstRun } from './Dashboard';
+import { KidSections } from './KidPhone';
 
 const DAY_LIMITS = [30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360, 480];
 const APP_LIMITS = [15, 30, 45, 60, 90, 120, 180];
@@ -155,6 +156,7 @@ export function KidPage() {
           <Link to="/kids/new" className="tab">Add a kid</Link>
         </nav>
       </PageHead>
+      <KidSections kidId={kid.id} current="rules" />
 
       <div className="grid-300">
         <DailyTimeCard d={d} busy={busy} onSave={(patch, text) => void save('time', () => api.updateKid(kid.id, patch), text)} />
@@ -169,11 +171,6 @@ export function KidPage() {
           <SafeSwitches kid={kid} onSaved={detail.reload} />
         </Card>
         <ContactsCard d={d} busy={busy} save={save} />
-        <Card title="Recommended">
-          <div style={{ fontSize: 15 }}>Kids Quest</div>
-          <p className="small muted">A free adventure game where kids earn coins for learning. Not part of Family Screen Warden, but it works well beside it.</p>
-          <a href="https://kidsquestgame.win" target="_blank" rel="noopener noreferrer">Learn more<span className="sr-only"> about Kids Quest (opens a new tab)</span></a>
-        </Card>
       </div>
 
       <KidDetailsCard key={`${kid.id}-${kid.name}-${kid.color}`} kid={kid} busy={busy} save={save} />
@@ -462,7 +459,7 @@ function ContactsCard({ d, busy, save }: { d: KidDetail; busy: string | null; sa
 
   return (
     <Card title="Phone: family contacts">
-      <p className="small muted">These people can always be called or texted, even when time is up or at bedtime. Emergency calls always work.</p>
+      <p className="small muted">These people can be called or texted from the phone. Who can still be reached when the phone is locked is set under <Link to={`/kids/${kid.id}/phone`}>Phone and chores</Link>. Emergency calls always work.</p>
       {contacts.length === 0 && editing === null && <p className="empty">No family contacts yet.</p>}
       {contacts.map((c) => (editing !== 'new' && editing?.id === c.id ? (
         <ContactForm key={c.id} initial={c} busy={busy === 'contact'} onCancel={() => setEditing(null)}

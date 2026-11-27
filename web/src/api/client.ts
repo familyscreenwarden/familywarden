@@ -1,6 +1,7 @@
 import type {
-  Account, AppPatch, Billing, ContactInput, Dashboard, Device, Kid, KidDetail, KidPatch,
-  KidRequest, NewApp, PairingCode, Platform, Report,
+  Account, AndroidApp, Apk, AppPatch, Billing, ChatMessage, Chore, ChoreApproval, ChoreInput, ContactInput, Dashboard, Device, Kid, KidDetail,
+  KidPatch, KidPhone, KidRequest, KidTexts, LauncherLook, NewApp, PairingCode, PhoneRules, PhoneText, Platform, Report, SetupQr,
+  TimeCode, UnlockCode, WifiInput,
 } from './types';
 
 export class ApiError extends Error {
@@ -42,10 +43,16 @@ export function errorMessage(e: unknown): string {
 }
 
 export function createApi(fetchFn: FetchLike, hooks: ApiHooks = {}) {
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /** `file`: the body is a file (an APK upload), sent as it is with the headers the server asks for. */
+  async function request<T>(method: string, path: string, body?: unknown, file?: { data: Blob; name: string }): Promise<T> {
     let res: Response;
     try {
-      res = await fetchFn(path, {
+      res = await fetchFn(path, file ? {
+        method,
+        credentials: 'include',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/vnd.android.package-archive', 'X-FSW-Upload': '1', 'X-Filename': encodeURIComponent(file.name) },
+        body: file.data,
+      } : {
         method,
         credentials: 'include',
         headers: body === undefined
@@ -80,6 +87,7 @@ export function createApi(fetchFn: FetchLike, hooks: ApiHooks = {}) {
   const get = <T>(p: string) => request<T>('GET', p);
   const post = <T>(p: string, b: unknown = {}) => request<T>('POST', p, b);
   const patch = <T>(p: string, b: unknown) => request<T>('PATCH', p, b);
+  const put = <T>(p: string, b: unknown) => request<T>('PUT', p, b);
   const del = <T>(p: string) => request<T>('DELETE', p);
   const id = encodeURIComponent;
 
@@ -87,7 +95,8 @@ export function createApi(fetchFn: FetchLike, hooks: ApiHooks = {}) {
     request,
     requestLink: (email: string) => post<{ ok: true; devLink?: string }>('/api/auth/request-link', { email }),
     logout: () => post<{ ok: true }>('/api/auth/logout'),
-    me: () => get<{ account: Account }>('/api/me'),
+    config: () => get<{ billingEnabled: boolean }>('/api/config'),
+    me: () => get<{ account: Account; billingEnabled?: boolean }>('/api/me'),
     updateAccount: (b: { timezone?: string; pin?: string }) => patch<unknown>('/api/account', b),
 
     dashboard: () => get<Dashboard>('/api/dashboard'),
@@ -119,6 +128,34 @@ export function createApi(fetchFn: FetchLike, hooks: ApiHooks = {}) {
     decide: (rId: string, approve: boolean) => post<unknown>(`/api/requests/${id(rId)}/decide`, { approve }),
 
     reports: (kidId: string, days: 7 | 30) => get<Report>(`/api/reports?kidId=${id(kidId)}&days=${days}`),
+
+    // Phones, chores, texts and APKs.
+    androidApp: () => get<AndroidApp>('/api/android-app'),
+    setupQr: (kidId: string, wifi: WifiInput | null) => post<SetupQr>('/api/devices/android-qr', wifi ? { kidId, wifi } : { kidId }),
+    unlockCode: (dId: string) => post<UnlockCode>(`/api/devices/${id(dId)}/unlock-code`),
+    kidPhone: (kidId: string) => get<KidPhone>(`/api/kids/${id(kidId)}/phone`),
+    savePhoneRules: (kidId: string, b: PhoneRules) => put<unknown>(`/api/kids/${id(kidId)}/phone-rules`, b),
+    saveLauncher: (kidId: string, b: LauncherLook) => put<unknown>(`/api/kids/${id(kidId)}/launcher`, b),
+    setContactAlways: (cId: string, always: boolean) => patch<unknown>(`/api/contacts/${id(cId)}`, { always }),
+    timeCode: (kidId: string, minutes: number) => post<TimeCode>(`/api/kids/${id(kidId)}/time-code`, { minutes }),
+    chores: (kidId: string) => get<{ chores: Chore[] }>(`/api/kids/${id(kidId)}/chores`),
+    createChore: (kidId: string, b: ChoreInput) => post<unknown>(`/api/kids/${id(kidId)}/chores`, b),
+    updateChore: (cId: string, b: Partial<ChoreInput & { active: boolean }>) => patch<unknown>(`/api/chores/${id(cId)}`, b),
+    deleteChore: (cId: string) => del<unknown>(`/api/chores/${id(cId)}`),
+    choreApprovals: (status: 'pending' | 'all') => get<{ approvals: ChoreApproval[] }>(`/api/chore-approvals?status=${status}`),
+    decideChore: (aId: string, approve: boolean) => post<unknown>(`/api/chore-approvals/${id(aId)}/decide`, { approve }),
+    chat: () => get<{ maxLength: number; messages: ChatMessage[] }>('/api/chat'),
+    sendChat: (text: string) => post<unknown>('/api/chat', { text }),
+    deleteChat: (mId: string) => del<unknown>(`/api/chat/${id(mId)}`),
+    kidTexts: (kidId: string) => get<KidTexts>(`/api/kids/${id(kidId)}/texts`),
+    textThread: (kidId: string, thread: string) => get<{ thread: string; names: string[]; texts: PhoneText[] }>(`/api/kids/${id(kidId)}/texts/thread?t=${id(thread)}`),
+    deleteHeldText: (tId: string) => post<unknown>(`/api/texts/${id(tId)}/delete`),
+    blockNumber: (kidId: string, phone: string) => post<unknown>(`/api/kids/${id(kidId)}/blocked-numbers`, { phone }),
+    unblockNumber: (kidId: string, num: string) => del<unknown>(`/api/kids/${id(kidId)}/blocked-numbers/${id(num)}`),
+    apks: () => get<{ maxBytes: number; apks: Apk[] }>('/api/apks'),
+    uploadApk: (name: string, file: File) => request<{ apk: Apk }>('POST', `/api/apks/upload?name=${id(name)}`, undefined, { data: file, name: file.name }),
+    deleteApk: (aId: string) => del<unknown>(`/api/apks/${id(aId)}`),
+    pushApk: (aId: string, kidIds: string[]) => post<{ phones: number; pushed: number }>(`/api/apks/${id(aId)}/push`, { kidIds }),
 
     billing: () => get<Billing>('/api/billing'),
     checkout: (interval: 'month' | 'year') => post<{ url: string }>('/api/billing/checkout', { interval }),

@@ -92,8 +92,14 @@ export function authRoutes(ctx: Ctx): Router {
     res.json({ ok: true });
   });
 
+  // What the sign-in page may know before anyone is signed in: whether there is a paywall to mention.
+  r.get('/config', (_req, res) => {
+    res.json({ billingEnabled: ctx.config.billingEnabled });
+  });
+
   r.get('/me', requireAccount(ctx), (_req, res) => {
-    res.json({ account: accountJson(account(res), new Date()) });
+    // `billingEnabled` sits beside the account: false means there is no paywall on this server right now.
+    res.json({ account: accountJson(account(res), new Date(), ctx.config.billingEnabled), billingEnabled: ctx.config.billingEnabled });
   });
 
   return r;
@@ -127,5 +133,5 @@ export async function patchAccount(ctx: Ctx, current: AccountRow, rawBody: unkno
   );
   const row = updated.rows[0];
   if (!row) throw new HttpError(401, 'Please sign in.');
-  return { account: accountJson(row, new Date()) };
+  return { account: accountJson(row, new Date(), ctx.config.billingEnabled) };
 }

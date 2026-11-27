@@ -1,8 +1,9 @@
 /**
  * Demo data: one family (demo@example.com) with two kids, three devices, apps, contacts,
- * a week of usage, two waiting requests and a few blocked sites.
+ * a week of usage, two waiting requests, a few blocked sites, chores and family chat.
  * Safe to run again: it removes the demo family first and builds it fresh.
  */
+import crypto from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { loadConfig } from './config';
 import { sha256Hex, randomToken } from './crypto';
@@ -147,6 +148,34 @@ export async function seed(databaseUrl: string): Promise<void> {
         [accountId, max, maxPc],
       );
 
+      // ---- what phones add: battery, chores, family chat ----
+      await db.query(
+        `UPDATE devices SET machine_id = 'demo-phone-0001', unlock_secret = $2, paired_at = now() - interval '17 days',
+                info = '{"battery": 72, "charging": false, "deviceOwner": true, "usageAccess": true}'::jsonb
+          WHERE id = $1`,
+        [avaPhone, crypto.randomBytes(32).toString('base64')],
+      );
+      await db.query("UPDATE contacts SET always = false WHERE account_id = $1 AND name = 'Grandma'", [accountId]);
+      const chore = (kid: string, name: string, minutes: number, repeat: string): Promise<string> =>
+        one(db, 'INSERT INTO chores (account_id, kid_id, name, minutes, repeat) VALUES ($1, $2, $3, $4, $5) RETURNING id', [accountId, kid, name, minutes, repeat]);
+      const dishes = await chore(ava, 'Empty the dishwasher', 15, 'daily');
+      const room = await chore(ava, 'Tidy your room', 20, 'weekly');
+      await chore(ava, 'Help wash the car', 30, 'once');
+      const trash = await chore(max, 'Take out the trash', 10, 'daily');
+      await db.query(
+        `INSERT INTO chore_completions (account_id, chore_id, kid_id, device_id, day, minutes, status, created_at, decided_at, decided_day) VALUES
+           ($1, $2, $3, $4, $5, 15, 'pending', now() - interval '12 minutes', NULL, NULL),
+           ($1, $6, $3, $4, $7, 20, 'approved', now() - interval '1 day', now() - interval '23 hours', $7),
+           ($1, $8, $9, NULL, $5, 10, 'pending', now() - interval '50 minutes', NULL, NULL)`,
+        [accountId, dishes, ava, avaPhone, today, room, addDays(today, -1), trash, max],
+      );
+      await db.query(
+        `INSERT INTO family_chat (account_id, kid_id, text, created_at) VALUES
+           ($1, $2, 'Can we have tacos tonight?', now() - interval '3 hours'),
+           ($1, NULL, 'Yes. Dinner is at six.', now() - interval '2 hours 50 minutes'),
+           ($1, $3, 'I finished my homework', now() - interval '40 minutes')`,
+        [accountId, ava, max],
+      );
       const blocked: Array<[string, string, string, string]> = [
         [max, maxPc, 'coolmathgames.com', '3 hours'],
         [max, maxPc, 'twitch.tv', '1 day 2 hours'],

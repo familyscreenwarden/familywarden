@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
+import { mediaFile, removeFile } from './files';
 import { evaluateRules, localTime, type RuleResult } from './rules';
 
 export type Db = Pool | PoolClient;
@@ -36,6 +37,17 @@ export interface KidRow {
   block_private: boolean;
   locked: boolean;
   created_at: Date;
+  launcher_layout: string;
+  launcher_theme: string;
+  launcher_look_locked: boolean;
+  phone_block_settings: boolean;
+  phone_block_reset: boolean;
+  phone_block_safe_boot: boolean;
+  phone_block_installs: boolean;
+  phone_block_accounts: boolean;
+  phone_block_usb: boolean;
+  phone_emergency_number: string;
+  phone_play_minutes: number;
 }
 
 export interface DeviceRow {
@@ -51,6 +63,19 @@ export interface DeviceRow {
   last_seen_at: Date | null;
   front_app: string | null;
   created_at: Date;
+  machine_id: string | null;
+  unlock_secret: string | null;
+  unlock_counter: number;
+  paired_at: Date | null;
+  info: DeviceInfo | null;
+}
+
+/** What a phone says about itself in its sync. */
+export interface DeviceInfo {
+  battery?: number | null;
+  charging?: boolean | null;
+  deviceOwner?: boolean | null;
+  usageAccess?: boolean | null;
 }
 
 export interface AppRow {
@@ -65,6 +90,7 @@ export interface AppRow {
   free: boolean;
   limit_minutes: number | null;
   created_at: Date;
+  category: string;
 }
 
 export interface ContactRow {
@@ -75,6 +101,7 @@ export interface ContactRow {
   phone: string;
   can_call: boolean;
   can_text: boolean;
+  always: boolean;
 }
 
 export interface RequestRow {
@@ -82,7 +109,7 @@ export interface RequestRow {
   account_id: string;
   kid_id: string;
   device_id: string | null;
-  kind: 'time' | 'app' | 'site';
+  kind: 'time' | 'app' | 'site' | 'contact';
   minutes: number | null;
   detail: string;
   identifier: string | null;
@@ -99,12 +126,20 @@ export function trialDaysLeft(account: AccountRow, now: Date): number {
   return Math.max(0, Math.ceil((account.trial_ends_at.getTime() - now.getTime()) / DAY_MS));
 }
 
-export function accountJson(a: AccountRow, now: Date): Record<string, unknown> {
+/** With billing switched off nobody is ever shown as locked: a row that was locked earlier reads as a trial. */
+export function shownPlan(a: Pick<AccountRow, 'plan'>, billingEnabled: boolean): AccountRow['plan'] {
+  return !billingEnabled && a.plan === 'locked' ? 'trial' : a.plan;
+}
+
+// The shapes below are pinned by tests (exact key sets). What phones add (launcher look, phone rules, "always"
+// contacts, battery) is served by its own routes in routes/phone.ts instead of new keys here.
+
+export function accountJson(a: AccountRow, now: Date, billingEnabled = true): Record<string, unknown> {
   return {
     id: a.id,
     email: a.email,
     timezone: a.timezone,
-    plan: a.plan,
+    plan: shownPlan(a, billingEnabled),
     trialEndsAt: a.trial_ends_at.toISOString(),
     trialDaysLeft: trialDaysLeft(a, now),
     pausedAll: a.paused_all,
@@ -281,9 +316,17 @@ export async function lockExpiredTrials(db: Db): Promise<number> {
   return res.rowCount ?? 0;
 }
 
-/** Housekeeping: removes sign-in links, sessions and pairing codes that can no longer be used. */
-export async function purgeExpired(db: Db): Promise<void> {
+/** Housekeeping: removes sign-in links, sessions and pairing codes that can no longer be used, and texts past their keep time. */
+export async function purgeExpired(db: Db, dataDir?: string): Promise<void> {
   await db.query("DELETE FROM login_tokens WHERE expires_at < now() - interval '1 day'");
   await db.query('DELETE FROM sessions WHERE expires_at < now()');
   await db.query("DELETE FROM pairing_codes WHERE expires_at < now() - interval '1 day'");
+  await db.query("DELETE FROM time_codes WHERE expires_at < now() - interval '7 days'");
+  await db.query("DELETE FROM unlock_codes WHERE expires_at < now() - interval '30 days'");
+  await db.query("DELETE FROM usage_seconds WHERE day < current_date - 40");
+  await db.query("DELETE FROM family_chat WHERE created_at < now() - interval '90 days'");
+  // Copies of kids' texts are kept 90 days (TEXT_KEEP_DAYS in routes/compat.ts), photos with them.
+  await db.query("DELETE FROM texts WHERE at < now() - interval '90 days'");
+  const old = await db.query<{ id: string }>("DELETE FROM text_media WHERE created_at < now() - interval '90 days' RETURNING id");
+  if (dataDir) for (const m of old.rows) removeFile(mediaFile(dataDir, m.id));
 }

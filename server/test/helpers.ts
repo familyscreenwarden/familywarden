@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { Pool } from 'pg';
@@ -6,6 +9,9 @@ import { loadConfig, type Config } from '../src/config';
 import { createPool, migrate } from '../src/db';
 import type { IpLimits } from '../src/context';
 import type { Mailer } from '../src/mail';
+
+export const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fsw-test-data-'));
+process.on('exit', () => fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }));
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://postgres@127.0.0.1:5544/fsw_test';
 
@@ -52,7 +58,12 @@ export async function startServer(
   env: Record<string, string> = {},
   options: { fetchImpl?: typeof fetch; ipLimits?: Partial<IpLimits> } = {},
 ): Promise<TestServer> {
-  const config = loadConfig({ DATABASE_URL: TEST_DATABASE_URL, PORT: '0', PUBLIC_URL: 'http://console.test', DEV_LINKS: '1', WEB_DIST: '/nonexistent/fsw-web-dist', ...env });
+  // BILLING_ENABLED is on here because the existing tests describe the paywall; the server's own default is off
+  // (test/android.test.ts covers that). DATA_DIR is a throwaway folder.
+  const config = loadConfig({
+    DATABASE_URL: TEST_DATABASE_URL, PORT: '0', PUBLIC_URL: 'http://console.test', DEV_LINKS: '1', WEB_DIST: '/nonexistent/fsw-web-dist',
+    BILLING_ENABLED: '1', DATA_DIR: TEST_DATA_DIR, ...env,
+  });
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
   let now = WEDNESDAY_AFTERNOON;

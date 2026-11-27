@@ -6,26 +6,31 @@ import type { Device, Kid, PairingCode, Platform } from '../api/types';
 import { STATUS_COLOR } from '../components/charts';
 import { Card, Confirm, ErrorBox, Loading, PageHead, StaleNote } from '../components/ui';
 import { timeAgo } from '../lib/format';
+import { EmergencyCode, PhoneApps, PhoneSetup } from './PhoneSetup';
 
 const PLATFORM: Record<Platform, string> = { windows: 'Windows PC', android: 'Android phone' };
 
 export function DevicesPage() {
   const { api } = useApp();
   const [params, setParams] = useSearchParams();
-  const adding = params.get('add') === '1';
+  const adding = params.get('add') === '1' || params.get('add') === 'phone';
+  const addingPhone = params.get('add') === 'phone';
   const devices = useLoad(() => api.devices(), [], adding ? 10000 : 30000);
   const kids = useLoad(() => api.kids(), []);
   const list = devices.data?.devices;
   const kidList = kids.data?.kids;
   const error = devices.error ?? kids.error;
 
-  const setAdding = (on: boolean) => setParams(on ? { add: '1' } : {}, { replace: true });
+  const setAdding = (on: boolean | 'phone') => setParams(on ? { add: on === 'phone' ? 'phone' : '1' } : {}, { replace: true });
 
   return (
     <>
       <PageHead title="Devices" sub="Windows PCs and Android phones. Each device follows the rules of one kid.">
         {kidList && kidList.length > 0 && !adding && (
-          <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>Add a device</button>
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setAdding('phone')}>Add a phone</button>
+            <button type="button" className="btn btn-ghost" onClick={() => setAdding(true)}>Add a PC</button>
+          </>
         )}
       </PageHead>
 
@@ -43,12 +48,15 @@ export function DevicesPage() {
             </Card>
           ) : (
             <>
-              {adding && <AddDevice kids={kidList} devices={list} onClose={() => setAdding(false)} onPaired={devices.reload} />}
+              {adding && <AddDevice key={addingPhone ? 'phone' : 'pc'} start={addingPhone ? 'android' : 'windows'} kids={kidList} devices={list} onClose={() => setAdding(false)} onPaired={devices.reload} />}
               {list.length === 0 && !adding && (
                 <Card className="first-run">
                   <p style={{ fontSize: 16 }}>No devices yet.</p>
-                  <p className="muted">Pair a Windows PC or an Android phone with a code from this console. iPhone, iPad, Mac and Chromebook are not supported.</p>
-                  <div><button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>Add a device</button></div>
+                  <p className="muted">Set up an Android phone with a QR code, or pair a Windows PC with a code from this console. iPhone, iPad, Mac and Chromebook are not supported.</p>
+                  <div className="row">
+                    <button type="button" className="btn btn-primary" onClick={() => setAdding('phone')}>Add a phone</button>
+                    <button type="button" className="btn btn-ghost" onClick={() => setAdding(true)}>Add a PC</button>
+                  </div>
                 </Card>
               )}
               {list.length > 0 && (
@@ -56,6 +64,7 @@ export function DevicesPage() {
                   {list.map((d) => <DeviceCard key={d.id} device={d} kids={kidList} onChanged={devices.reload} />)}
                 </div>
               )}
+              <PhoneApps kids={kidList} devices={list} />
             </>
           )}
         </>
@@ -132,8 +141,10 @@ function DeviceCard({ device, kids, onChanged }: { device: Device; kids: Kid[]; 
         <div className="row">
           <button type="button" className="btn btn-ghost" onClick={() => setRenaming(true)} aria-label={`Rename ${device.name}`}>Rename</button>
           <button type="button" className="btn btn-danger" onClick={() => setConfirm(true)} aria-label={`Remove ${device.name}`}>Remove</button>
+          {device.platform === 'android' && <Link to={`/kids/${device.kidId}/phone`} className="btn btn-ghost">Phone rules</Link>}
         </div>
       )}
+      {!renaming && device.platform === 'android' && <EmergencyCode device={device} />}
       <Confirm open={confirm} title={`Remove ${device.name}?`} confirmLabel="Remove device" danger busy={busy}
         body="The device is unpaired from your family and stops getting rule changes from this console. To use it again you need to pair it with a new code."
         onCancel={() => setConfirm(false)}
@@ -147,12 +158,12 @@ function clock(d: Date): string {
   return `${h % 12 === 0 ? 12 : h % 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
 }
 
-function AddDevice({ kids, devices, onClose, onPaired }: {
-  kids: Kid[]; devices: Device[]; onClose: () => void; onPaired: () => Promise<void>;
+function AddDevice({ kids, devices, onClose, onPaired, start }: {
+  kids: Kid[]; devices: Device[]; onClose: () => void; onPaired: () => Promise<void>; start: Platform;
 }) {
   const { api, run } = useApp();
   const [kidId, setKidId] = useState(kids[kids.length - 1]?.id ?? '');
-  const [platform, setPlatform] = useState<Platform>('windows');
+  const [platform, setPlatform] = useState<Platform>(start);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState<PairingCode | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -184,8 +195,11 @@ function AddDevice({ kids, devices, onClose, onPaired }: {
   }
 
   return (
-    <Card title="Add a device" action={<button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>}>
-      {!code && (
+    <Card title={platform === 'android' ? 'Add a phone' : 'Add a PC'} action={<button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>}>
+      {platform === 'android' && (
+        <PhoneSetup kids={kids} kidId={kidId} onKid={setKidId} devices={devices} onClose={onClose} onCheck={onPaired} />
+      )}
+      {platform === 'windows' && !code && (
         <form className="stack-lg" onSubmit={(e) => { e.preventDefault(); void getCode(); }}>
           <div className="form-grid">
             <div className="field">
@@ -206,15 +220,12 @@ function AddDevice({ kids, devices, onClose, onPaired }: {
               </div>
             </fieldset>
           </div>
-          {platform === 'android' && (
-            <div className="banner banner-warn small">Android setup needs a factory reset, which erases everything on the phone. Back up what you want to keep first.</div>
-          )}
           <p className="small muted">iPhone, iPad, Mac and Chromebook are not supported.</p>
           <div><button type="submit" className="btn btn-primary" disabled={busy || !kidId}>{busy ? 'Getting a code…' : 'Get a pairing code'}</button></div>
         </form>
       )}
 
-      {code && (
+      {platform === 'windows' && code && (
         <div className="stack-lg">
           {paired ? (
             <div className="banner banner-info" role="status">

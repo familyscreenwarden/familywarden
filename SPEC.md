@@ -135,4 +135,90 @@ Billing
 
 ## Config (env)
 
-`DATABASE_URL`, `PORT` (3000), `PUBLIC_URL` (e.g. `https://app.familyscreenwarden.com`), `SESSION_SECRET`, `DEV_LINKS`, `AWS_SES_REGION`, `AWS_SES_ACCESS_KEY_ID`, `AWS_SES_SECRET_ACCESS_KEY`, `MAIL_FROM_EMAIL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`. Secrets never go in the repo: ship `.env.example` only.
+`DATABASE_URL`, `PORT` (3000), `PUBLIC_URL` (e.g. `https://app.familyscreenwarden.com`), `SESSION_SECRET`, `DEV_LINKS`, `AWS_SES_REGION`, `AWS_SES_ACCESS_KEY_ID`, `AWS_SES_SECRET_ACCESS_KEY`, `MAIL_FROM_EMAIL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BILLING_ENABLED`, `PUBLISH_TOKEN`, `DATA_DIR` (the last three: see "Android phones, chores and the kid-device API"). Secrets never go in the repo: ship `.env.example` only.
+
+
+## Android phones, chores and the kid-device API
+
+Added for the kids' Android app (`android/`, package `com.familyscreenwarden.kids`, device-admin receiver
+`com.familyscreenwarden.kids/.admin.KidsAdminReceiver`). The simple `/api/device` API above still works and is unchanged.
+
+### The paywall switch
+
+`BILLING_ENABLED` (default off; `1`, `true`, `yes` or `on` switch it on). Off: no account is ever locked, the
+trial-expiry job does nothing, no route answers 402, `GET /api/me` carries `billingEnabled: false` beside `account`,
+`GET /api/billing` carries `billingEnabled: false` and `stripeReady: false`, checkout and portal answer 503, and an
+account stored as `locked` reads as `trial`. `GET /api/config` (no sign-in) → `{billingEnabled}` for the sign-in page.
+The console hides Billing from the menu, the trial wording and the "choose a plan" screen. On: everything in
+"Billing" above applies as before. The Stripe webhook is handled either way.
+
+### Kid-device API (header `Authorization: Bearer <device token>`, JSON)
+
+Words in the JSON: `member` = kid, `computer` = device, setup code = pairing code, app `key` = the id of the app's
+row, `exes` = `[identifier]` (an Android package name). Errors are `{error}` like everywhere else.
+
+- `POST /api/warden/setup/check` (no token) `{code}` → `{family, name, oneKid:true, minutesLeft, kids:[{id,name,color,avatar:null}]}`. 400 for a wrong or expired code.
+- `POST /api/android/pair` (no token) `{code, memberId, deviceId, model?, version?}` → `{token, secret, computerId, name, member:{id,name}, resetHour:0, warnMinutes:[10,5]}`. `deviceId` is the phone's own stable id: the same phone may pair again with the same code (same device row, new token); another phone gets 409. `secret` (32 random bytes, base64) is for emergency codes.
+- `POST /api/warden/sync` → the whole picture. Sends (all optional): `version`, `usage:{day, generalSeconds, appSeconds:{<app key>|"site": seconds}}` (totals for the day; the highest value is kept; another day is dropped), `installed:[{name, exe}]`, `blocked:[{exe,name,at}]`, `blockedSites:[{host,at}]`, `unlocksUsed:[n]`, `live:{state, foreground, foregroundName, …}`, `device:{model, android, battery, charging, deviceOwner, usageAccess}`, `installResults:[{id, status: installing|done|failed, message?, package?, label?}]`, `playInstalled:[{package,label}]`, `texts:[{id, thread:[numbers], dir: in|out, from?, body, at (ms), status?: shown|held|waiting, media?:[{id,type}]}]`. Answer:
+  ```
+  { serverTime, day, dayEndsAt,            // the family's day: midnight to midnight in their time zone
+    paused:false, locked,                  // locked = "pause all screens" or the parent's "lock now"
+    kid:{id,name},
+    allowance:{generalMinutes, baseMinutes, extraMinutes, appMinutes:{}},
+    used:{generalSeconds, appSeconds:{<app key>: s}},          // over all the kid's devices
+    apps:[{key,name,category,exes:[identifier],allowed:true,budgeted:false,limitMinutes,free}],   // allowed apps only
+    sites:[{host, tile, folder:null, from:null, to:null}],
+    warnMinutes:[10,5],
+    requests:[{id, exe, name, status: pending|allowed|denied}],   // the last day
+    voidUnlocks:[n], shutdown:null, shutdownCancel:null, watchOnly:null,
+    bedtime:{at, until, warnMinutes}|null,                        // two instants; the device compares them itself
+    fastSync,                                                     // true while a fresh APK install waits
+    safeSearch:{search, youTube},
+    launcher:{enabled:true, layout, theme, lookLocked},
+    update:{version, url, sha256, size}|null,
+    // Android only:
+    phone:{ rules:{blockSettings, blockReset, blockSafeBoot, blockInstalls, blockAccounts, blockUsb, emergencyNumber, playMinutes},
+            contacts:[{id,name,phone,always,canCall,canText}] },   // contacts that can be called
+    texting:{ friends:[{id,name,phone}], asked:[{name,phone,status}], blocked:[num], drop:[text id] },
+    apkInstalls:[{id, name, url:'/api/android/apk/<id>', sha256, size}] }
+  ```
+- `POST /api/warden/launcher` → `{kid:{id,name,emoji:null,color}, chores:[{id,title,status: todo|waiting|done, minutes, timer:false}], choreMinutes:0, dayText, bedtimeText, chat:[{id, who, mine, emoji:null, color, text, at}]}`. `chat` is always a list (the last 40 messages of the last 7 days, oldest first).
+- `POST /api/warden/launcher/act` `{action, …}` → `{ok, message}`:
+  - `chore` `{id}`: marks a chore done (waits for a parent). 404 when it is not the kid's.
+  - `chat` `{text}`: a message to the family chat (300 characters, 6 a minute per kid).
+  - `look` `{layout?, theme?, what?}`: stores the launcher's layout (`bright|gamer|glass`) and colour theme (`galaxy|ocean|jungle|sunset`); unknown names are ignored, never refused. `{ok:false}` when a parent locked the look, unless `what:"grownup"`.
+  - `ask` `{what: time|app|site, minutes?, text?}`: a request for a parent.
+  - `parent` `{what: time|lock, minutes?}`: from the device's PIN menu (the device checked the PIN): adds minutes to today, or locks the kid.
+  - any other action → `{ok:false}`.
+- `POST /api/warden/pin` `{pin}` → `{ok, message}`; 409 when no parent PIN is set; 429 during the lock-out.
+- `POST /api/warden/redeem` `{code}` → the sync answer plus `{minutes, appKey:null}`; 400 for a wrong or used code. Redeeming a bonus-time code also lifts the parent's "lock now".
+- `POST /api/android/request` `{package, name?}` → `{status: sent|pending|denied|allowed, id?, message}`.
+- `POST /api/android/friend` `{name, phone, note?}` → `{status: sent|pending|denied|approved, id?, message}` (a request of kind `contact`; yes makes a text-only contact).
+- `GET /api/android/apk/:installId` → the pushed APK. `POST /api/android/text-media/:msgId/:mediaId` (raw body, image/video/audio, 8 MB) → `{ok,id}`.
+- No token: `GET /api/android/download[?v=]` → the published app (APK). `GET /api/android/get?c=<code>` → a small page for quick install with a `screenwarden://setup?server=…&code=…` link.
+
+### Publishing the app
+
+- `POST /internal/android/publish`: `Authorization: Bearer <PUBLISH_TOKEN>`, headers `X-Version` (`1.2.3`), `X-Sha256` (hex of the file, optional but checked), `X-Signature-Checksum` (SHA-256 of the signing certificate; URL-safe base64, also accepted as base64 or hex; optional), `X-Notes` (base64), body = the APK (200 MB at most). → `{ok, version, sha256, size, signatureChecksum?}`. 401 wrong token, 409 version exists, 503 when `PUBLISH_TOKEN` is shorter than 32 characters. Files go to `DATA_DIR/releases/android/<version>.apk`; the newest 3 keep their file.
+- `GET /internal/android/latest` → `{version,size,sha256,signatureChecksum,notes,createdAt}` or `null`.
+- The setup QR is the JSON Android's setup screen reads: `PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME`, `…_PACKAGE_DOWNLOAD_LOCATION` (`PUBLIC_URL/api/android/download?v=`), one checksum (`…_SIGNATURE_CHECKSUM` when the publisher sent it, else `…_PACKAGE_CHECKSUM` of the file), `PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED`, optional `PROVISIONING_WIFI_SSID` / `_SECURITY_TYPE` / `_PASSWORD`, and `PROVISIONING_ADMIN_EXTRAS_BUNDLE: {server, code}`.
+
+### Parent API additions (cookie session)
+
+- `GET /api/android-app` → `{latest, package, admin}`. `POST /api/devices/android-qr` `{kidId, wifi?:{ssid,password?,security: WPA|WEP|NONE}}` → `{code, expiresAt, minutes:60, kidId, version, payload, svg, link, linkSvg, download}`; 409 when no app is published.
+- `GET /api/kids/:id/phone` → `{rules, launcher:{layout,theme,lookLocked}, contacts:[… with always], phones:[{id,name,model,osVersion,appVersion,lastSeenAt,battery,charging,deviceOwner,usageAccess,canUnlock}], timeCodes}`. `PUT /api/kids/:id/phone-rules`, `PUT /api/kids/:id/launcher`. Contacts take `always` in `POST`/`PATCH` (their answers keep the old shape).
+- Chores: `GET|POST /api/kids/:id/chores` `{name, minutes (0–240), repeat?: once|daily|weekly}`, `PATCH|DELETE /api/chores/:id` (`active` too). `GET /api/chore-approvals?status=pending|all` → `{approvals:[{id,choreId,choreName,kidId,kidName,deviceName,minutes,day,status,createdAt,decidedAt}]}`. `POST /api/chore-approvals/:id/decide` `{approve}`: yes adds a `time_grants` row (reason `chore`) for today.
+- Family chat: `GET /api/chat` → `{maxLength, messages:[{id,kidId,from,color,text,at}]}` (30 days, 200 at most), `POST /api/chat` `{text}`, `DELETE /api/chat/:id`.
+- Texts copied from phones: `GET /api/kids/:id/texts`, `GET /api/kids/:id/texts/thread?t=`, `GET /api/text-media/:id`, `POST /api/texts/:id/delete` (a held text), `POST /api/kids/:id/blocked-numbers` `{phone}`, `DELETE /api/kids/:id/blocked-numbers/:num`.
+- APKs: `GET /api/apks`, `POST /api/apks/upload?name=` (raw body, headers `X-FSW-Upload: 1`, `X-Filename`), `DELETE /api/apks/:id`, `POST /api/apks/:id/push` `{kidIds}`.
+- Codes: `POST /api/devices/:id/unlock-code` → `{code, counter, expiresAt}` (emergency code n = HMAC-SHA256(secret, "unlock:" + n), first 4 bytes big-endian, mod 1e8, 8 digits; checked by the device itself, 24 hours), `DELETE /api/devices/:id/unlock-codes/:counter`. `POST /api/kids/:id/time-code` `{minutes}` → `{code, minutes, expiresAt}` (bonus time, once, 24 hours).
+- Requests have a fourth kind, `contact`.
+
+### Tables (migration `002_android_compat`)
+
+New columns: `kids.launcher_layout|launcher_theme|launcher_look_locked`, `kids.phone_block_settings|_reset|_safe_boot|_installs|_accounts|_usb`, `kids.phone_emergency_number`, `kids.phone_play_minutes`; `devices.machine_id|unlock_secret|unlock_counter|paired_at|info`; `pairing_codes.machine_id|device_id`; `apps.category`; `contacts.always`; `requests.kind` also allows `contact`.
+New tables: `usage_seconds` (device, kid, day, app_key, seconds), `chores`, `chore_completions`, `family_chat`, `texts`, `text_media`, `blocked_numbers`, `apks`, `apk_installs`, `app_releases`, `unlock_codes`, `time_codes`.
+
+### Config
+
+`BILLING_ENABLED` (see above), `PUBLISH_TOKEN` (32+ characters; empty = publishing off), `DATA_DIR` (default `server/data`, `/data` in Docker: published app versions, uploaded APKs, photos from texts).
