@@ -1,8 +1,9 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { Ctx } from '../context';
-import { isPairingCode, normalizePairingCode, randomToken, sha256Hex, verifyPin } from '../crypto';
+import { isPairingCode, normalizePairingCode, randomToken, sha256Hex } from '../crypto';
 import { withTransaction } from '../db';
 import { Body, HttpError, isUuid, notFound, RateLimiter } from '../http';
+import { checkParentPin, PIN_LOCK_MINUTES } from '../pin';
 import { localTime } from '../rules';
 import { loadKidStates, type AccountRow, type ContactRow, type DeviceRow } from '../state';
 import { normalizeIdentifier } from './parent';
@@ -12,8 +13,6 @@ const MAX_USAGE_ITEMS = 1000;
 const MAX_INSTALLED_ITEMS = 3000;
 const MAX_BLOCKED_ITEMS = 200;
 const MAX_PENDING_REQUESTS = 5;
-const PIN_MAX_TRIES = 5;
-const PIN_LOCK_MINUTES = 5;
 
 interface DeviceAuth {
   device: DeviceRow;
@@ -312,42 +311,22 @@ export function deviceRoutes(ctx: Ctx): Router {
     const pin = new Body(req.body).raw('pin');
     if (typeof pin !== 'string' || !/^\d{4,8}$/.test(pin)) throw new HttpError(400, 'The PIN must be 4 to 8 digits.');
 
-    // Count the try BEFORE checking the PIN, in one statement, so a burst of parallel guesses
-    // cannot get more than 5 tries per lock-out window.
-    const taken = await pool.query<{ parent_pin_hash: string; pin_failed_count: number; locked: boolean }>(
-      `UPDATE accounts
-          SET pin_failed_count = CASE WHEN pin_failed_count + 1 >= $2 THEN 0 ELSE pin_failed_count + 1 END,
-              pin_locked_until = CASE WHEN pin_failed_count + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE NULL END
-        WHERE id = $1 AND parent_pin_hash IS NOT NULL AND (pin_locked_until IS NULL OR pin_locked_until <= now())
-        RETURNING parent_pin_hash, pin_failed_count, (pin_locked_until IS NOT NULL) AS locked`,
-      [account.id, PIN_MAX_TRIES, PIN_LOCK_MINUTES],
-    );
-    const attempt = taken.rows[0];
-    if (!attempt) {
-      const why = await pool.query<{ has_pin: boolean; locked_seconds: number }>(
-        `SELECT parent_pin_hash IS NOT NULL AS has_pin,
-                COALESCE(GREATEST(0, CEIL(EXTRACT(EPOCH FROM (pin_locked_until - now())))), 0)::int AS locked_seconds
-           FROM accounts WHERE id = $1`,
-        [account.id],
-      );
-      const row = why.rows[0];
-      if (row && !row.has_pin) throw new HttpError(403, 'No parent PIN is set yet. A parent can set one in the console.');
-      const seconds = Math.max(1, row?.locked_seconds ?? PIN_LOCK_MINUTES * 60);
-      res.setHeader('Retry-After', String(seconds));
-      throw new HttpError(429, `Too many wrong PINs. Try again in ${Math.ceil(seconds / 60)} minutes.`, {
-        retryAfterSeconds: seconds,
-      });
+    const checked = await checkParentPin(pool, account.id, pin);
+    switch (checked.result) {
+      case 'ok':
+        res.json({ ok: true });
+        return;
+      case 'no-pin':
+        throw new HttpError(403, 'No parent PIN is set yet. A parent can set one in the console.');
+      case 'locked-out':
+        res.setHeader('Retry-After', String(checked.retryAfterSeconds));
+        throw new HttpError(429, `Too many wrong PINs. Try again in ${Math.ceil(checked.retryAfterSeconds / 60)} minutes.`, {
+          retryAfterSeconds: checked.retryAfterSeconds,
+        });
+      default:
+        if (checked.lockedNow) throw new HttpError(403, `Wrong PIN. PIN checks are locked for ${PIN_LOCK_MINUTES} minutes.`, { triesLeft: 0 });
+        throw new HttpError(403, 'Wrong PIN.', { triesLeft: checked.triesLeft });
     }
-
-    if (await verifyPin(pin, attempt.parent_pin_hash)) {
-      await pool.query('UPDATE accounts SET pin_failed_count = 0, pin_locked_until = NULL WHERE id = $1', [account.id]);
-      res.json({ ok: true });
-      return;
-    }
-    if (attempt.locked) {
-      throw new HttpError(403, `Wrong PIN. PIN checks are locked for ${PIN_LOCK_MINUTES} minutes.`, { triesLeft: 0 });
-    }
-    throw new HttpError(403, 'Wrong PIN.', { triesLeft: PIN_MAX_TRIES - attempt.pin_failed_count });
   });
 
   return r;

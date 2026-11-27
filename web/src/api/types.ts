@@ -7,7 +7,7 @@ export type Platform = 'windows' | 'android';
 export type AppPlatform = Platform | 'any';
 export type LockReason = 'paused' | 'parent' | 'bedtime' | 'time' | null;
 export type DeviceStatus = 'in_use' | 'locked' | 'off';
-export type RequestKind = 'time' | 'app' | 'site';
+export type RequestKind = 'time' | 'app' | 'site' | 'contact';
 export type RequestStatus = 'pending' | 'approved' | 'denied';
 
 export interface Account {
@@ -177,4 +177,137 @@ export interface Billing {
   trialDaysLeft: number | null;
   prices: { month: number; year: number };
   stripeReady: boolean;
+  /** Present and false when the server has the paywall switched off. */
+  billingEnabled?: boolean;
+}
+
+// ---- Phones, chores, texts, APKs (SPEC.md "Android phones and the compatibility device API") ----
+
+export interface ChoreApproval {
+  id: string;
+  choreId: string;
+  choreName: string;
+  kidId: string;
+  kidName: string;
+  deviceName: string | null;
+  minutes: number;
+  day: string;
+  status: 'pending' | 'approved' | 'declined';
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export type ChoreRepeat = 'once' | 'daily' | 'weekly';
+
+export interface Chore {
+  id: string;
+  kidId: string;
+  name: string;
+  minutes: number;
+  repeat: ChoreRepeat;
+  active: boolean;
+  /** What the kid's launcher shows for it today. */
+  today: 'todo' | 'waiting' | 'done' | 'hidden';
+}
+
+export type ChoreInput = Pick<Chore, 'name' | 'minutes' | 'repeat'>;
+
+export interface PhoneRules {
+  blockSettings: boolean;
+  blockReset: boolean;
+  blockSafeBoot: boolean;
+  blockInstalls: boolean;
+  blockAccounts: boolean;
+  blockUsb: boolean;
+  emergencyNumber: string;
+  playMinutes: number;
+}
+
+export type LauncherTheme = 'galaxy' | 'ocean' | 'jungle' | 'sunset';
+
+export interface LauncherLook {
+  layout: string;
+  theme: LauncherTheme;
+  lookLocked: boolean;
+}
+
+export interface PhoneContact extends Contact {
+  /** Reachable even when the phone is locked (time is up, bedtime, a parent's lock). */
+  always: boolean;
+}
+
+export interface KidPhoneDevice {
+  id: string;
+  name: string;
+  model: string | null;
+  osVersion: string | null;
+  appVersion: string | null;
+  lastSeenAt: string | null;
+  battery: number | null;
+  charging: boolean | null;
+  deviceOwner: boolean | null;
+  usageAccess: boolean | null;
+  canUnlock: boolean;
+}
+
+export interface TimeCode { code: string; minutes: number; expiresAt: string }
+
+export interface KidPhone {
+  rules: PhoneRules;
+  launcher: LauncherLook;
+  contacts: PhoneContact[];
+  phones: KidPhoneDevice[];
+  timeCodes: TimeCode[];
+}
+
+export interface AppRelease { version: string; size: number; sha256: string; notes: string; createdAt: string }
+export interface AndroidApp { latest: AppRelease | null; package: string; admin: string }
+
+export interface WifiInput { ssid: string; password?: string; security: 'WPA' | 'WEP' | 'NONE' }
+
+export interface SetupQr {
+  code: string;
+  expiresAt: string;
+  minutes: number;
+  version: string;
+  /** The QR code for Android's setup screen, as an SVG picture. */
+  svg: string;
+  /** A link any phone camera opens (quick install, no lock-down), and its QR code. */
+  link: string;
+  linkSvg: string;
+}
+
+export interface UnlockCode { code: string; counter: number; expiresAt: string }
+
+export interface ApkPush { id: string; deviceId: string; deviceName: string; kidName: string; status: 'waiting' | 'installing' | 'done' | 'failed'; message: string | null; at: string }
+export interface Apk { id: string; name: string; fileName: string | null; package: string | null; size: number; sha256: string; createdAt: string; pushes: ApkPush[] }
+
+export interface PhoneText {
+  id: string;
+  dir: 'in' | 'out';
+  from: string | null;
+  fromName: string | null;
+  body: string;
+  at: string;
+  status: string;
+  media: { id: string | null; type: string; url: string | null }[];
+}
+
+export interface TextThread { thread: string; names: string[]; at: string; count: number; last: { dir: 'in' | 'out'; fromName: string | null; body: string } }
+
+export interface KidTexts {
+  keepDays: number;
+  held: PhoneText[];
+  threads: TextThread[];
+  blocked: { num: string; phone: string; at: string }[];
+}
+
+export interface ChatMessage {
+  id: string;
+  /** The kid who wrote it; null when a parent did. */
+  kidId: string | null;
+  from: string;
+  color: string | null;
+  text: string;
+  at: string;
 }

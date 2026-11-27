@@ -299,7 +299,7 @@ export function createMockFetch(search: string): FetchLike {
       if (approve && r.kind === 'time') kidOr404(r.kidId).grants += r.minutes ?? 0;
       if (approve && r.kind !== 'time') {
         s.apps.push({
-          id: newId(), kidId: r.kidId, kind: r.kind, platform: r.kind === 'site' ? 'any' : 'android',
+          id: newId(), kidId: r.kidId, kind: r.kind === 'site' ? 'site' : 'app', platform: r.kind === 'site' ? 'any' : 'android',
           identifier: r.identifier ?? r.detail ?? 'unknown', name: r.detail ?? 'App', allowed: true, free: false, limitMinutes: null, usedMinutes: 0,
         });
       }

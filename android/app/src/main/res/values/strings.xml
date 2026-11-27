@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Family Screen Warden</string>
+    <!-- Under the icon, where the full name doesn't fit. -->
+    <string name="launcher_label">Screen Warden</string>
+    <string name="admin_label">Family Screen Warden</string>
+    <string name="admin_description">Keeps this phone set up the way your family chose in your Family Screen Warden account: screen time, allowed apps and safe browsing.</string>
+</resources>

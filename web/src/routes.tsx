@@ -3,8 +3,10 @@ import { Layout } from './components/Layout';
 import { SignIn } from './pages/SignIn';
 import { DashboardPage } from './pages/Dashboard';
 import { KidsIndex, KidPage, NewKidPage } from './pages/Kids';
+import { KidPhonePage } from './pages/KidPhone';
 import { DevicesPage } from './pages/Devices';
 import { RequestsPage } from './pages/Requests';
+import { ChatPage } from './pages/Chat';
 import { ReportsPage } from './pages/Reports';
 import { SafeBrowsingPage } from './pages/SafeBrowsing';
 import { BillingPage } from './pages/Billing';
@@ -20,8 +22,10 @@ export function AppRoutes() {
         <Route path="/kids" element={<KidsIndex />} />
         <Route path="/kids/new" element={<NewKidPage />} />
         <Route path="/kids/:id" element={<KidPage />} />
+        <Route path="/kids/:id/phone" element={<KidPhonePage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/requests" element={<RequestsPage />} />
+        <Route path="/chat" element={<ChatPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/safe-browsing" element={<SafeBrowsingPage />} />
         <Route path="/billing" element={<BillingPage />} />

@@ -8,8 +8,11 @@ import { HttpError, RateLimiter } from './http';
 import { createMailer, type Mailer } from './mail';
 import { authRoutes } from './routes/auth';
 import { billingRoutes, stripeWebhook } from './routes/billing';
+import { compatRoutes } from './routes/compat';
 import { deviceRoutes } from './routes/device';
 import { parentRoutes } from './routes/parent';
+import { apkUpload, phoneRoutes } from './routes/phone';
+import { latestReleaseRoute, publishRelease } from './releases';
 import { StripeClient } from './stripe';
 
 export interface AppOptions {
@@ -62,7 +65,7 @@ export function createApp(options: AppOptions): express.Express {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     res.setHeader('Content-Security-Policy', CSP);
     if (config.production) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-    if (req.path.startsWith('/api/') || req.path.startsWith('/stripe/')) res.setHeader('Cache-Control', 'no-store');
+    if (req.path.startsWith('/api/') || req.path.startsWith('/stripe/') || req.path.startsWith('/internal/')) res.setHeader('Cache-Control', 'no-store');
     next();
   });
 
@@ -77,6 +80,10 @@ export function createApp(options: AppOptions): express.Express {
 
   // Stripe signs the raw bytes, so this route must come before the JSON parser.
   app.post('/stripe/webhook', express.raw({ type: () => true, limit: '1mb' }), stripeWebhook(ctx));
+
+  // The kids' Android app, published by GitHub Actions: the body is the APK, so this also comes before the JSON parser.
+  app.post('/internal/android/publish', publishRelease(ctx));
+  app.get('/internal/android/latest', latestReleaseRoute(ctx));
 
   // A broad per-address limit against runaway clients; the tight limits live on the single routes.
   const perIp = new RateLimiter(ctx.ipLimits.api, 60 * 1000);
@@ -98,21 +105,39 @@ export function createApp(options: AppOptions): express.Express {
     });
   }
 
+  // Uploads whose body is a file (a photo from a phone's texts, an APK from a parent): before the JSON parser.
+  const compat = compatRoutes(ctx);
+  app.post('/api/android/text-media/:msgId/:mediaId', compat.textMediaUpload);
+  app.post('/api/apks/upload', requireAccount(ctx), requireUnlocked, apkUpload(ctx));
+
   // Device sync carries the installed-app list, so it gets a larger body allowance than the rest.
   app.use('/api/device/sync', express.json({ limit: '1mb' }));
+  app.use('/api/warden/sync', express.json({ limit: '1mb' }));
   app.use('/api', express.json({ limit: '100kb' }));
 
   app.use('/api/device', deviceRoutes(ctx));
+  // The kid-device API: what the kids' Android app (and later the Windows app) speaks.
+  app.use('/api/warden', compat.warden);
+  app.use('/api/android', compat.android);
+  app.use('/api/warden', (_req: Request, _res: Response) => {
+    throw new HttpError(404, 'That address does not exist.');
+  });
+  app.use('/api/android', (_req: Request, _res: Response) => {
+    throw new HttpError(404, 'That address does not exist.');
+  });
   app.use('/api', authRoutes(ctx));
   // Everything below needs a signed-in parent. Billing stays open to locked accounts; the rest answers 402.
   app.use('/api', requireAccount(ctx));
   app.use('/api', billingRoutes(ctx));
-  app.use('/api', requireUnlocked, parentRoutes(ctx));
+  app.use('/api', requireUnlocked, parentRoutes(ctx), phoneRoutes(ctx));
 
   app.use('/api', (_req: Request, _res: Response) => {
     throw new HttpError(404, 'That address does not exist.');
   });
   app.use('/stripe', (_req: Request, _res: Response) => {
+    throw new HttpError(404, 'That address does not exist.');
+  });
+  app.use('/internal', (_req: Request, _res: Response) => {
     throw new HttpError(404, 'That address does not exist.');
   });
 

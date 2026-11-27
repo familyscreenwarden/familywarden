@@ -1,10 +1,11 @@
 import { Router, type Request, type Response } from 'express';
 import { account, type Ctx } from '../context';
 import { Body, HttpError, isUuid } from '../http';
-import { trialDaysLeft, type AccountRow } from '../state';
+import { shownPlan, trialDaysLeft, type AccountRow } from '../state';
 import { STRIPE_NOT_READY, verifyStripeSignature } from '../stripe';
 
 export const PRICES = { month: 4, year: 36 } as const;
+export const BILLING_OFF = 'Family Screen Warden is free to use right now. There is nothing to pay for.';
 
 /** Parent billing routes. Open to locked accounts too, so they can choose a plan. */
 export function billingRoutes(ctx: Ctx): Router {
@@ -13,13 +14,21 @@ export function billingRoutes(ctx: Ctx): Router {
 
   r.get('/billing', (_req, res) => {
     const acc = account(res);
+    const on = ctx.config.billingEnabled;
     res.json({
-      plan: acc.plan,
+      plan: shownPlan(acc, on),
       trialEndsAt: acc.trial_ends_at.toISOString(),
       trialDaysLeft: trialDaysLeft(acc, new Date()),
       prices: PRICES,
-      stripeReady: ctx.stripe.ready,
+      stripeReady: on && ctx.stripe.ready,
+      ...(on ? {} : { billingEnabled: false }),
     });
+  });
+
+  // With the paywall off there is nothing to pay for: the buttons answer plainly instead of opening Stripe.
+  r.use('/billing', (_req, _res, next) => {
+    if (!ctx.config.billingEnabled) throw new HttpError(503, BILLING_OFF);
+    next();
   });
 
   r.post('/billing/checkout', async (req, res) => {

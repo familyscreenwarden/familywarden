@@ -116,6 +116,12 @@ export class RateLimiter {
     private readonly windowMs: number,
   ) {}
 
+  /** True while the caller still has hits left (nothing is counted). */
+  peek(key: string, now: number = Date.now()): boolean {
+    const entry = this.hits.get(key);
+    return !entry || entry.resetAt <= now || entry.count < this.limit;
+  }
+
   /** Counts one hit. Returns false when the caller is over the limit. */
   take(key: string, now: number = Date.now()): boolean {
     if (this.hits.size > 20000) {

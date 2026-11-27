@@ -7,6 +7,8 @@ Screen-time rules for kids' Windows PCs and Android phones, run by parents from 
 | `server/` | Console server: parent API, device API, billing (Node 22, TypeScript, Express, Postgres 16). See `server/README.md`. |
 | `web/` | Parent console (React + Vite). The server serves `web/dist` in production. |
 | `site/` | Static sales site for familyscreenwarden.com (Cloudflare Pages, no build step). |
+| `android/` | The kids' Android app (device owner). See `android/README.md`. |
+| `launcher/` | The kid launcher page the Android app shows (and a Windows app will share). |
 | `docs/mockups/` | The approved design mockups. |
 | `SPEC.md` | The shared contract: data model, rules, API, design tokens. |
 
@@ -37,7 +39,8 @@ cd web && npm test
 
 ## Not done yet
 
-- The Windows and Android apps still live in the FamilyHub repo and have not been renamed or pointed at this server.
-- Stripe and Amazon SES have only been tested against stand-ins, never the real services.
+- The Android app (`android/`) has not been compiled since it was brought into this repo; its first GitHub Actions build is the real test, and it has never run on a real phone against this server.
+- There is no Windows app in this repo yet.
+- Billing is switched off (`BILLING_ENABLED` unset). Stripe and Amazon SES have only been tested against stand-ins, never the real services.
 - The Docker image has not been built or run.
 - `site/privacy.html` and `site/terms.html` are drafts with placeholders and need a lawyer's review.

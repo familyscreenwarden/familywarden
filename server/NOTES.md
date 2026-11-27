@@ -81,3 +81,103 @@ Each point is the simplest reading that still keeps families' data safe.
 - Rate limits per network address live in memory (one server process). The per-email link limit, the
   request limit and the PIN lock-out live in the database.
 - No weekly report email; the spec has no route for it.
+
+
+## Android phones, chores, the kid-device API (added later)
+
+How the app's words and rules were fitted to this server. The app's code in `android/` and its launcher page in
+`launcher/` were the contract.
+
+### Time
+
+- **The day runs midnight to midnight** in the family's time zone (`dayEndsAt` = the next local midnight,
+  `resetHour: 0` in the pair answer).
+- **Phones report seconds, the console counts minutes.** What a phone reports is kept as it came in
+  `usage_seconds` (highest value wins) and turned into `usage` minute rows after every sync: one row per app
+  (whole minutes) and one row without an app for the rest of the day's counted time (website tiles, rounding).
+  So dashboard, reports and the simple `/api/device` API all see phone time, and phones see time used on devices
+  that report minutes.
+- **`paused` is always false.** In the app's words "paused" means the rules are off for a while. Warden's
+  "pause all screens" is a lock, so it is sent as `locked: true`, like a parent's "lock now".
+- **Bedtime** is sent as two instants (the window we are in, else the next one), read the same way as the rule
+  engine reads start and end. The device locks itself between them.
+- **Per-app limits** go out as `limitMinutes`; `budgeted` is always false and `allowance.appMinutes` is empty
+  (Warden has no separate per-app time budget).
+
+### Apps and websites
+
+- **Only allowed apps are sent**, for the device's platform. The app key is the id of the app's row; `exes` holds
+  the one identifier.
+- **Apps the phone finds** (`installed`, and apps it closed) are added turned off, as with the simple API.
+- **An app allowed by name** (a kid typed "Roblox" in "Ask a grown-up") and the same app reported by package are
+  one row: whichever comes second joins the first (names are compared as slugs).
+- **Categories** (`game`, `school`, `browser`, `video`, `other`) are guessed from the name when a phone reports an
+  app. There is no console control for them yet.
+- **Allowed websites** are sent as tiles (`tile` = the name). "Only allowed websites" off has no meaning on the
+  phone: its built-in browser only ever opens listed sites.
+
+### Setup
+
+- **A setup code is for one kid** (the parent picks the kid in the console), so `setup/check` always answers
+  `oneKid: true` with that kid. QR codes last 60 minutes; codes from `POST /api/devices/pairing-code` for Android
+  work on the phone API too.
+- `family` in `setup/check` is the parent's email address (accounts have no family name).
+- **The same phone may pair again with its code** (same device row, new token, emergency counter back to 0).
+- **The QR carries one checksum**: the signing certificate's when the publish step sent `X-Signature-Checksum`,
+  otherwise the file's SHA-256.
+- The quick-install link and the QR's admin extras use the key `server` for this server's address.
+- The Wi-Fi password is only put into the QR; it is not stored or logged.
+
+### Requests, chores, codes
+
+- `POST /api/android/request` and the launcher's "ask" make ordinary requests. The same thing is not asked twice,
+  a "no" stands for 12 hours, at most 5 wait per kid (the 6th gets `status: pending` with a message, not an error).
+- **Chores**: `once` (gone the day after it was approved), `daily`, `weekly` (once per Monday-to-Sunday week).
+  A chore marked done and not answered yet stays "waiting" however long it takes. Declined = to do again.
+  Approval adds the minutes to the day of the approval, not the day the kid tapped. A chore worth 0 minutes is fine.
+- `choreMinutes` in the launcher answer is 0, because every chore has its own minutes.
+- **Bonus-time codes** (`/api/warden/redeem`): 8 characters, 24 hours, once. Redeeming also lifts the parent's
+  "lock now" (the parent handed out the code), but not "pause all screens".
+- **Emergency codes**: the device checks them by itself. At most 5 unused ones per device (the app only tries the
+  next 10 counters). The per-device secret is stored as it is in `devices.unlock_secret` (not encrypted): a
+  database leak would let someone work out codes for that device.
+- **The PIN route** answers `{ok:false}` for a wrong PIN (200), 409 with no PIN, 429 in the lock-out; the same
+  5-tries rule as `/api/device/pin`, counted per family.
+- `launcher/act` with `action: parent` or `look` + `what: grownup` is trusted: the device checked the PIN.
+  A modified app with a valid device token could skip that check.
+
+### Family chat and texts
+
+- **Family chat** is per family: every kid's launcher and the parent console. 300 characters; a kid may send 6 a
+  minute, parents 20. Launchers get the last 40 messages of 7 days; the console shows 30 days; messages older than
+  90 days are deleted. A parent can remove any message. There is no switch to turn the chat off.
+- **Texts (SMS)**: the server accepts copies of a phone's texts in `sync` (`texts`), photos through
+  `text-media`, "ask to add a friend" (`/api/android/friend`), and sends `texting` back. **The current app does not
+  send any of this**: its texts stay on the phone, so the console's "Texts on the phone" card stays empty and says so.
+  The routes are tested with requests shaped like the ones an app with texting would send.
+- Contacts: the phone's call list is the contacts with "can call"; contacts with "can text" only go out as
+  `texting.friends`. The current app texts anyone in its call list, so "can call, cannot text" is not enforced by it.
+
+### Files and publishing
+
+- Files live under `DATA_DIR`: `releases/android/<version>.apk`, `apks/<id>.apk`, `text-media/<id>`.
+  Uploads are streamed to disk through a `.part` file. Limits: app version 200 MB, APK 200 MB (20 per family),
+  photo 8 MB.
+- App versions are for the whole server, not per family. The newest 3 keep their file.
+- `GET /internal/android/latest` needs no token (it shows a version number and checksums).
+
+### Paywall switch
+
+- The existing tests describe the paywall, so the test helper starts servers with `BILLING_ENABLED=1`;
+  `test/android.test.ts` runs with the real default (off).
+- With billing off a `locked` row is left as it is in the database and only shown as `trial`.
+
+### Left out
+
+- A game hero, a family feed and cheers: not in this product. Unknown launcher actions answer `{ok:false}`.
+- `/api/warden/pair`, `/api/warden/request` and `/api/warden/download` (what a Windows app would use): not built;
+  there is no Windows app yet.
+- Remote "turn off" (`shutdown`) and "only watch" (`watchOnly`): always null.
+- No email or push to parents when a kid asks for something or marks a chore done: it shows in the console only.
+- Old files of deleted families are not swept (there is no "delete family" route).
+- The mock mode of the web app (`npm run dev:mock`) does not know the new routes.

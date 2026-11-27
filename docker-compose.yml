@@ -23,7 +23,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://fsw:${POSTGRES_PASSWORD}@db:5432/fsw
+    volumes:
+      - fsw-data:/data
     ports:
       - "3000:3000"
 volumes:
   fsw-db:
+  fsw-data:

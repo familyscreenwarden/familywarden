@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shield for notifications (white; Android tints it). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <group android:scaleX="0.16" android:scaleY="0.16" android:translateX="2.4" android:translateY="0.8">
+        <path android:pathData="M60,8 L112,26 V68 C112,100 90,122 60,132 C30,122 8,100 8,68 V26 Z"
+            android:strokeColor="#FFFFFFFF" android:strokeWidth="11" android:strokeLineJoin="round" />
+        <path android:pathData="M82,46 H46 V68 H74 V92 H38"
+            android:strokeColor="#FFFFFFFF" android:strokeWidth="10" android:strokeLineCap="round" android:strokeLineJoin="round" />
+        <path android:pathData="M76,46 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z"
+            android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="5" />
+        <path android:pathData="M32,92 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 Z"
+            android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="5" />
+    </group>
+</vector>

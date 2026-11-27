@@ -87,7 +87,9 @@ export function requireAccount(ctx: Ctx) {
       await ctx.pool.query('UPDATE sessions SET last_seen_at = now() WHERE token_hash = $1', [hash]);
     }
     // The trial check also runs in the background; doing it here makes the lock exact to the second.
-    if (row.plan === 'trial' && row.trial_ends_at.getTime() <= Date.now()) {
+    // With billing switched off nobody is locked: a trial never ends and an old lock does not count.
+    res.locals.billingEnabled = ctx.config.billingEnabled;
+    if (ctx.config.billingEnabled && row.plan === 'trial' && row.trial_ends_at.getTime() <= Date.now()) {
       await ctx.pool.query("UPDATE accounts SET plan = 'locked' WHERE id = $1 AND plan = 'trial'", [row.id]);
       row.plan = 'locked';
     }
@@ -99,7 +101,7 @@ export function requireAccount(ctx: Ctx) {
 
 /** A locked account (trial over, no plan) may only read /api/me, use billing and sign out. */
 export function requireUnlocked(_req: Request, res: Response, next: NextFunction): void {
-  if (account(res).plan === 'locked') {
+  if (res.locals.billingEnabled !== false && account(res).plan === 'locked') {
     throw new HttpError(402, 'Your free trial has ended. Choose a plan to keep using the console.', { locked: true });
   }
   next();

@@ -1,7 +1,9 @@
 import { Router, type Response } from 'express';
 import { account, type Ctx } from '../context';
+import { appSlug, isPackageName } from '../compat/logic';
 import { randomPairingCode } from '../crypto';
 import { withTransaction } from '../db';
+import { mediaFile, removeFile } from '../files';
 import { Body, HttpError, isUuid, notFound } from '../http';
 import { addDays, isClock, lastDays, localTime, statusText } from '../rules';
 import {
@@ -268,8 +270,10 @@ export function parentRoutes(ctx: Ctx): Router {
 
   r.delete('/kids/:id', async (req, res) => {
     const id = idParam(req.params.id, 'kid');
+    const photos = await pool.query<{ id: string }>('SELECT id FROM text_media WHERE kid_id = $1 AND account_id = $2', [id, account(res).id]);
     const deleted = await pool.query('DELETE FROM kids WHERE id = $1 AND account_id = $2', [id, account(res).id]);
     if (deleted.rowCount !== 1) throw notFound('kid');
+    for (const p of photos.rows) removeFile(mediaFile(ctx.config.dataDir, p.id));
     res.json({ ok: true });
   });
 
@@ -390,11 +394,12 @@ export function parentRoutes(ctx: Ctx): Router {
     const number = phone(body);
     const canCall = body.optBool('canCall', 'Can call') ?? true;
     const canText = body.optBool('canText', 'Can text') ?? true;
+    const always = body.optBool('always', 'Always reachable') ?? true;
     const count = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM contacts WHERE account_id = $1 AND kid_id = $2', [acc.id, kid.id]);
     if ((count.rows[0]?.n ?? 0) >= MAX_CONTACTS_PER_KID) throw new HttpError(400, `A kid can have at most ${MAX_CONTACTS_PER_KID} contacts.`);
     const created = await pool.query<ContactRow>(
-      'INSERT INTO contacts (account_id, kid_id, name, phone, can_call, can_text) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [acc.id, kid.id, name, number, canCall, canText],
+      'INSERT INTO contacts (account_id, kid_id, name, phone, can_call, can_text, always) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [acc.id, kid.id, name, number, canCall, canText, always],
     );
     const contact = created.rows[0];
     if (!contact) throw new Error('Insert returned no row');
@@ -414,6 +419,7 @@ export function parentRoutes(ctx: Ctx): Router {
     if (body.has('phone')) set('phone', phone(body));
     if (body.has('canCall')) set('can_call', body.bool('canCall', 'Can call'));
     if (body.has('canText')) set('can_text', body.bool('canText', 'Can text'));
+    if (body.has('always')) set('always', body.bool('always', 'Always reachable'));
     if (sets.length === 0) throw new HttpError(400, 'Nothing to change.');
     const updated = await pool.query<ContactRow>(
       `UPDATE contacts SET ${sets.join(', ')} WHERE id = $1 AND account_id = $2 RETURNING *`,
@@ -557,16 +563,43 @@ export function parentRoutes(ctx: Ctx): Router {
           today,
           minutes,
         ]);
+      } else if (request.kind === 'contact') {
+        // "Ask to add a friend" from the phone's texting app: yes makes a contact the kid can text (not call).
+        const number = request.identifier ?? '';
+        if (!number) throw new HttpError(400, 'That request does not say which phone number it is for.');
+        await db.query(
+          `INSERT INTO contacts (account_id, kid_id, name, phone, can_call, can_text, always)
+           SELECT $1, $2, $3, $4, false, true, false
+            WHERE NOT EXISTS (SELECT 1 FROM contacts WHERE account_id = $1 AND kid_id = $2 AND phone = $4)`,
+          [acc.id, request.kid_id, request.detail || number, number],
+        );
+        await db.query('DELETE FROM blocked_numbers WHERE kid_id = $1 AND num = $2', [request.kid_id, number]);
       } else {
         const platform = request.kind === 'site' ? 'any' : (request.device_platform ?? 'any');
         const identifier = normalizeIdentifier(request.kind, platform, request.identifier ?? request.detail);
         if (!identifier) throw new HttpError(400, 'That request does not say which app or website it is for.');
-        await db.query(
-          `INSERT INTO apps (account_id, kid_id, kind, platform, identifier, name, allowed)
-           VALUES ($1, $2, $3, $4, $5, $6, true)
-           ON CONFLICT (kid_id, kind, identifier) DO UPDATE SET allowed = true`,
-          [acc.id, request.kid_id, request.kind, platform, identifier, request.detail || identifier],
-        );
+        // An app asked for by name ("Roblox") that a phone already reported by package: allow that one, not a second row.
+        let known = false;
+        if (request.kind === 'app' && platform === 'android' && !isPackageName(identifier)) {
+          const slug = appSlug(request.detail || identifier);
+          const rows = await db.query<{ id: string; name: string }>(
+            "SELECT id, name FROM apps WHERE account_id = $1 AND kid_id = $2 AND kind = 'app' AND platform = 'android'",
+            [acc.id, request.kid_id],
+          );
+          const twin = slug ? rows.rows.find((r) => appSlug(r.name) === slug) : undefined;
+          if (twin) {
+            await db.query('UPDATE apps SET allowed = true WHERE id = $1', [twin.id]);
+            known = true;
+          }
+        }
+        if (!known) {
+          await db.query(
+            `INSERT INTO apps (account_id, kid_id, kind, platform, identifier, name, allowed)
+             VALUES ($1, $2, $3, $4, $5, $6, true)
+             ON CONFLICT (kid_id, kind, identifier) DO UPDATE SET allowed = true`,
+            [acc.id, request.kid_id, request.kind, platform, identifier, request.detail || identifier],
+          );
+        }
       }
     });
 

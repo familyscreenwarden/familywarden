@@ -165,4 +165,193 @@ export const migrations: Migration[] = [
       CREATE INDEX blocked_events_account_idx ON blocked_events (account_id, at DESC);
     `,
   },
+  {
+    // Android phones through the kid-device API (/api/warden + /api/android), chores, family chat, texts, APKs, releases.
+    id: '002_android_compat',
+    sql: `
+      ALTER TABLE kids
+        ADD COLUMN launcher_layout text NOT NULL DEFAULT 'bright' CHECK (launcher_layout IN ('bright','gamer','glass')),
+        ADD COLUMN launcher_theme text NOT NULL DEFAULT 'galaxy' CHECK (launcher_theme IN ('galaxy','ocean','jungle','sunset')),
+        ADD COLUMN launcher_look_locked boolean NOT NULL DEFAULT false,
+        ADD COLUMN phone_block_settings boolean NOT NULL DEFAULT true,
+        ADD COLUMN phone_block_reset boolean NOT NULL DEFAULT true,
+        ADD COLUMN phone_block_safe_boot boolean NOT NULL DEFAULT true,
+        ADD COLUMN phone_block_installs boolean NOT NULL DEFAULT true,
+        ADD COLUMN phone_block_accounts boolean NOT NULL DEFAULT true,
+        ADD COLUMN phone_block_usb boolean NOT NULL DEFAULT true,
+        ADD COLUMN phone_emergency_number text NOT NULL DEFAULT '911' CHECK (phone_emergency_number ~ '^[0-9]{2,6}$'),
+        ADD COLUMN phone_play_minutes integer NOT NULL DEFAULT 10 CHECK (phone_play_minutes BETWEEN 2 AND 60);
+
+      ALTER TABLE devices
+        ADD COLUMN machine_id text,
+        ADD COLUMN unlock_secret text,
+        ADD COLUMN unlock_counter integer NOT NULL DEFAULT 0,
+        ADD COLUMN paired_at timestamptz,
+        ADD COLUMN info jsonb;
+      CREATE INDEX devices_machine_idx ON devices (account_id, machine_id);
+
+      ALTER TABLE pairing_codes
+        ADD COLUMN machine_id text,
+        ADD COLUMN device_id uuid REFERENCES devices(id) ON DELETE SET NULL;
+
+      ALTER TABLE apps
+        ADD COLUMN category text NOT NULL DEFAULT 'other' CHECK (category IN ('game','school','browser','video','other'));
+
+      ALTER TABLE contacts ADD COLUMN always boolean NOT NULL DEFAULT true;
+
+      ALTER TABLE requests DROP CONSTRAINT requests_kind_check;
+      ALTER TABLE requests ADD CONSTRAINT requests_kind_check CHECK (kind IN ('time','app','site','contact'));
+
+      -- What a compatibility device reports: seconds per day. app_key '' is the day's counted time,
+      -- any other key is an apps.id (as text) or 'site' (website tiles).
+      CREATE TABLE usage_seconds (
+        device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        day date NOT NULL,
+        app_key text NOT NULL,
+        seconds integer NOT NULL CHECK (seconds >= 0),
+        PRIMARY KEY (device_id, day, app_key)
+      );
+      CREATE INDEX usage_seconds_kid_day_idx ON usage_seconds (kid_id, day);
+
+      CREATE TABLE chores (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        minutes integer NOT NULL DEFAULT 15 CHECK (minutes BETWEEN 0 AND 240),
+        repeat text NOT NULL DEFAULT 'once' CHECK (repeat IN ('once','daily','weekly')),
+        active boolean NOT NULL DEFAULT true,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX chores_kid_idx ON chores (account_id, kid_id);
+
+      CREATE TABLE chore_completions (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        chore_id uuid NOT NULL REFERENCES chores(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
+        day date NOT NULL,
+        minutes integer NOT NULL CHECK (minutes BETWEEN 0 AND 240),
+        status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','declined')),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        decided_at timestamptz,
+        decided_day date
+      );
+      CREATE INDEX chore_completions_account_idx ON chore_completions (account_id, status, created_at DESC);
+      CREATE INDEX chore_completions_chore_idx ON chore_completions (chore_id, day);
+
+      -- Family chat: kids write from the launcher, parents from the console. kid_id NULL = a parent wrote it.
+      CREATE TABLE family_chat (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid REFERENCES kids(id) ON DELETE CASCADE,
+        text text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX family_chat_account_idx ON family_chat (account_id, created_at DESC);
+
+      CREATE TABLE texts (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
+        phone_id text NOT NULL,
+        thread text NOT NULL,
+        participants text[] NOT NULL,
+        dir text NOT NULL CHECK (dir IN ('in','out')),
+        from_num text,
+        body text NOT NULL DEFAULT '',
+        media jsonb NOT NULL DEFAULT '[]'::jsonb,
+        status text NOT NULL DEFAULT 'shown' CHECK (status IN ('shown','held','waiting','deleted')),
+        at timestamptz NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (device_id, phone_id)
+      );
+      CREATE INDEX texts_kid_idx ON texts (account_id, kid_id, thread, at DESC);
+
+      CREATE TABLE text_media (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
+        phone_msg_id text NOT NULL,
+        phone_media_id text NOT NULL,
+        type text NOT NULL,
+        size integer NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (device_id, phone_media_id)
+      );
+
+      CREATE TABLE blocked_numbers (
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        num text NOT NULL,
+        phone text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (kid_id, num)
+      );
+
+      CREATE TABLE apks (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        file_name text,
+        package text,
+        size integer NOT NULL,
+        sha256 text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX apks_account_idx ON apks (account_id, created_at DESC);
+
+      CREATE TABLE apk_installs (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        apk_id uuid NOT NULL REFERENCES apks(id) ON DELETE CASCADE,
+        device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        status text NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting','installing','done','failed')),
+        message text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX apk_installs_device_idx ON apk_installs (device_id, status);
+
+      -- Published versions of the kids' Android app (one list for the whole server, not per family).
+      CREATE TABLE app_releases (
+        version text PRIMARY KEY,
+        size integer NOT NULL,
+        sha256 text NOT NULL,
+        signature_checksum text,
+        notes text NOT NULL DEFAULT '',
+        has_file boolean NOT NULL DEFAULT true,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE unlock_codes (
+        device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        counter integer NOT NULL,
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        expires_at timestamptz NOT NULL,
+        used_at timestamptz,
+        cancelled_at timestamptz,
+        PRIMARY KEY (device_id, counter)
+      );
+
+      CREATE TABLE time_codes (
+        code text PRIMARY KEY,
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        minutes integer NOT NULL CHECK (minutes BETWEEN 1 AND 240),
+        expires_at timestamptz NOT NULL,
+        used_at timestamptz,
+        used_by_device uuid REFERENCES devices(id) ON DELETE SET NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX time_codes_kid_idx ON time_codes (account_id, kid_id, created_at DESC);
+    `,
+  },
 ];
