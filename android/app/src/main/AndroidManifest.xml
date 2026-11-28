@@ -32,6 +32,11 @@
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The live map in the parent console (Where.kt): the kid sees that sharing is on in the Phone menu. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -76,6 +81,8 @@
             </intent-filter>
         </activity>
         <activity android:name=".SiteActivity" android:exported="false" android:lockTaskMode="if_whitelisted" android:screenOrientation="fullUser" android:configChanges="orientation|screenSize|keyboardHidden" />
+        <!-- "This site is blocked" (safe browsing), with "Ask a grown-up". -->
+        <activity android:name=".BlockedActivity" android:exported="false" android:lockTaskMode="if_whitelisted" android:screenOrientation="fullUser" android:configChanges="orientation|screenSize|keyboardHidden" android:excludeFromRecents="true" />
 
         <!-- Device owner: set up from Android's welcome screen with the QR code from the parent console. -->
         <receiver
@@ -115,7 +122,7 @@
             android:name=".KidsService"
             android:exported="false"
             android:directBootAware="true"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|location">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Family screen time: counts the kid's time and applies the family's rules." />
         </service>
 

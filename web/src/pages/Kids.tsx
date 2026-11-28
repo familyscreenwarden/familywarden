@@ -3,7 +3,6 @@ import type { FormEvent } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useApp, useLoad } from '../app';
 import type { AppPlatform, Contact, ContactInput, Kid, KidApp, KidDetail, KidPatch, NewApp } from '../api/types';
-import { SafeSwitches } from '../components/SafeSwitches';
 import { Card, Confirm, ErrorBox, ICON, Icon, Loading, PageHead, Progress, Switch } from '../components/ui';
 import { KID_COLORS, safeColor, textOn } from '../lib/color';
 import { formatClockShort, formatLimitOption, formatMinutes, joinList, possessive } from '../lib/format';
@@ -168,7 +167,11 @@ export function KidPage() {
 
       <div className="grid-260">
         <Card title="Safe browsing">
-          <SafeSwitches kid={kid} onSaved={detail.reload} />
+          <ul className="notes">
+            <li>{kid.onlyAllowedSites ? `${kid.name} can only open the websites allowed above.` : `${kid.name} can open websites that are not on the list above (a filtered or open web).`}</li>
+            <li>SafeSearch is {kid.safeSearch ? 'on' : 'off'}, YouTube Restricted Mode is {kid.youtubeRestricted ? 'on' : 'off'}, private browsing is {kid.blockPrivate ? 'blocked' : 'allowed'}.</li>
+          </ul>
+          <div><Link to={`/kids/${kid.id}/levels`} className="btn btn-ghost">Levels and web</Link></div>
         </Card>
         <ContactsCard d={d} busy={busy} save={save} />
       </div>

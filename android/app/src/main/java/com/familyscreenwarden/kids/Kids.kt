@@ -120,6 +120,7 @@ object Kids {
         Texts.init(ctx)
         Sound.init(ctx)
         Studio.init(ctx)
+        Where.init(ctx)
     }
 
     /** Called by KidsService: the 1-second clock, the server check-ins and the launcher extras. */
@@ -150,6 +151,13 @@ object Kids {
                 first = false
                 for (i in 0 until wait) { if (syncNow) break; delay(1000) }
                 syncNow = false
+            }
+        }
+        // Where the phone is, for the live map (every 5 minutes; every 5 seconds while a grown-up watches).
+        scope.launch {
+            while (true) {
+                if (paired) runCatching { Where.step(api) }.onFailure { Log.w(TAG, "location: ${it.message}") }
+                delay(5_000)
             }
         }
         scope.launch {
@@ -305,12 +313,12 @@ object Kids {
         Contacts.sync(ctx, s.phone.contacts)
         policy.allowOnly(allowed)
         policy.alwaysOnVpn(true)
-        policy.chrome(Sites.allowedNow(s.sites, LocalTime.now()), s.safeSearch)
+        policy.chrome(Sites.allowedNow(s.sites, LocalTime.now()), s.safeSearch, s.web)
         if (status.state == "locked" && !wasLocked) home()
         Log.i(TAG, "Allowed now: ${allowed.sorted()} (${status.state})")
     }
 
-    private fun sitesKey(s: Snapshot) = Sites.allowedNow(s.sites, LocalTime.now()).joinToString(",")
+    private fun sitesKey(s: Snapshot) = Sites.allowedNow(s.sites, LocalTime.now()).joinToString(",") + "|" + s.web.mode + ":" + s.web.block.hashCode() + ":" + s.safeSearch
 
     /** Called when an install starts or ends (installing needs the "no installs" lock-down off for a moment). */
     fun reapply() { lastEnforced = ""; scope.launch { val st = gate.withLock { engine.status(now(), offline) }; enforce(st) } }
@@ -374,6 +382,13 @@ object Kids {
                     add(buildJsonObject { put("exe", pkg.take(120)); put("name", b.name.take(120)); put("at", java.time.Instant.ofEpochMilli(b.atMs).toString()) })
                 }
             }
+            // Websites safe browsing refused today (newest first), for "Blocked today" in the parent console.
+            val dayAgo = System.currentTimeMillis() - 24 * 3600_000L
+            putJsonArray("blockedSites") {
+                synchronized(blockedSitesLock) { engine.state.blockedSites.entries.filter { it.value > dayAgo }.sortedByDescending { it.value }.take(40).toList() }.forEach { (h, at) ->
+                    add(buildJsonObject { put("host", h.take(200)); put("at", java.time.Instant.ofEpochMilli(at).toString()) })
+                }
+            }
             val fg = launched
             putJsonObject("live") {
                 put("state", st.state)
@@ -402,6 +417,7 @@ object Kids {
             synchronized(playInstalled) { playInstalled.removeAll(played.toSet()) }
             Texts.reported(texts)
             Texts.applyServer(s.texting)
+            Where.ringIfAsked(s.location?.ring)
             scope.launch { runCatching { Texts.uploadMedia(h) } }
             if (sendInstalled) lastInstalledReport = now()
             gate.withLock {
@@ -493,6 +509,11 @@ object Kids {
                 put("sound", Sound.dto())
                 put("texts", true)
                 put("textsUnread", runCatching { Texts.unreadShown() }.getOrDefault(0))
+                // The live map: the kid always sees that sharing is on, and can check in.
+                putJsonObject("location") {
+                    put("sharing", s?.location?.sharing != false && Where.allowed())
+                    put("live", s?.location?.live == true)
+                }
             }
         }.toString()
     }
@@ -555,6 +576,12 @@ object Kids {
             }
             "power" -> if (s("what") == "sleep") { if (!policy.lockNow()) toast("Press the phone's side button to turn the screen off.") }
                 else policy.reboot()?.let { toast(it) }
+            "checkin" -> {
+                val kind = s("kind").takeIf { it in setOf("ok", "pickup", "help") } ?: "ok"
+                toast(if (kind == "ok") "Sending…" else "Sending to all your grown-ups…")
+                scope.launch { toast(Where.checkIn(api, kind)) }
+            }
+            "stop-ring" -> Where.stopRing()
             "call" -> {
                 val num = contact(s("id"))?.phone ?: s("num").takeIf { n -> n.isNotBlank() && snap?.texting?.friends?.any { Phone.same(it.phone, n) } == true }
                 when {
@@ -695,6 +722,53 @@ object Kids {
             if (r.message.isNotEmpty() && (action !in setOf("look", "chore") || !r.ok)) toast(r.message)
             if (action == "ask" && r.ok) syncSoon()
         } catch (e: WardenApiException) { toast(if (e.reached) e.message ?: "That didn't work." else "Can't reach Family Screen Warden right now.") }
+    }
+
+    // ---------------------------------------------------------------- safe browsing
+    private val blockedSitesLock = Any()
+    private val siteNotified = mutableMapOf<String, Long>()
+    private var lastSiteNotice = 0L
+
+    /**
+     * Safe browsing refused a website (the DNS filter, Chrome's list or the site browser): remembered for the parent console's
+     * "Blocked today", and, when the screen is on, a notification that opens the "This site is blocked" screen.
+     */
+    fun siteBlocked(rawHost: String, notify: Boolean = true) {
+        if (!::ctx.isInitialized) return
+        val host = com.familyscreenwarden.kids.core.Sites.normalize(rawHost)
+        if (host.isEmpty()) return
+        val t = System.currentTimeMillis()
+        val fresh = synchronized(blockedSitesLock) {
+            val m = engine.state.blockedSites
+            val before = m[host]
+            m[host] = t
+            if (m.size > 60) m.entries.sortedBy { it.value }.take(m.size - 60).map { it.key }.forEach { m.remove(it) }
+            before == null || t - before > 10 * 60_000L
+        }
+        if (fresh) scope.launch { runCatching { gate.withLock { store.saveState(engine.state) } } }
+        if (!notify) return
+        val interactive = runCatching { ctx.getSystemService(android.os.PowerManager::class.java).isInteractive }.getOrDefault(false)
+        synchronized(siteNotified) {
+            if (!interactive || t - (siteNotified[host] ?: 0L) < 10 * 60_000L || t - lastSiteNotice < 20_000L) return
+            siteNotified[host] = t
+            lastSiteNotice = t
+        }
+        val pi = android.app.PendingIntent.getActivity(ctx, host.hashCode(), BlockedActivity.intent(ctx, host), android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(ctx, "kids").setSmallIcon(R.drawable.ic_notify).setContentTitle("This site is blocked")
+            .setContentText("$host isn't allowed. Tap to ask a grown-up.").setContentIntent(pi).setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT).build()
+        runCatching { ctx.getSystemService(NotificationManager::class.java).notify(7000 + (host.hashCode() and 0x3ff), n) }
+    }
+
+    /** "Ask a grown-up" on the blocked screen: saying yes puts the site on the kid's list (on every device). */
+    suspend fun askSite(host: String): RequestResult {
+        val h = api ?: return RequestResult("error", null, "This phone isn't set up yet.")
+        return try {
+            val r = json.decodeFromString<RequestResult>(h.post("android/request", buildJsonObject { put("site", host) }))
+            if (r.id != null && r.status in setOf("sent", "pending")) gate.withLock { engine.state.asked[r.id] = "site:$host" }
+            syncSoon()
+            r
+        } catch (e: WardenApiException) { RequestResult("error", null, if (e.reached) e.message ?: "That didn't work." else "Can't reach Family Screen Warden right now.") }
     }
 
     /** Ask about an app that isn't allowed (by its package). */

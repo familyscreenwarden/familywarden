@@ -135,7 +135,7 @@ Billing
 
 ## Config (env)
 
-`DATABASE_URL`, `PORT` (3000), `PUBLIC_URL` (e.g. `https://app.familyscreenwarden.com`), `SESSION_SECRET`, `DEV_LINKS`, `AWS_SES_REGION`, `AWS_SES_ACCESS_KEY_ID`, `AWS_SES_SECRET_ACCESS_KEY`, `MAIL_FROM_EMAIL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BILLING_ENABLED`, `PUBLISH_TOKEN`, `DATA_DIR`, `KID_MEDIA_QUOTA_MB` (the last four: see "Android phones, chores and the kid-device API" and "Kids' photos, videos and texts"). Secrets never go in the repo: ship `.env.example` only.
+`DATABASE_URL`, `PORT` (3000), `PUBLIC_URL` (e.g. `https://app.familyscreenwarden.com`), `SESSION_SECRET`, `DEV_LINKS`, `AWS_SES_REGION`, `AWS_SES_ACCESS_KEY_ID`, `AWS_SES_SECRET_ACCESS_KEY`, `MAIL_FROM_EMAIL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `BILLING_ENABLED`, `PUBLISH_TOKEN`, `DATA_DIR`, `KID_MEDIA_QUOTA_MB` (the last four: see "Android phones, chores and the kid-device API" and "Kids' photos, videos and texts"), `MAP_TILE_URL`, `MAP_TILE_ATTRIBUTION`, `MAP_TILE_ATTRIBUTION_URL`, `MAP_TILE_CACHE_MB` (see "Levels, safe browsing and the live map"). Secrets never go in the repo: ship `.env.example` only.
 
 
 ## Android phones, chores and the kid-device API
@@ -268,3 +268,78 @@ Each kid has four pages: Time, apps and websites; Phone and chores; Texts (`/kid
 ### Table (migration `003_kid_media`)
 
 `kid_media`: id, account_id, kid_id, device_id (null once the phone is removed), phone_id, kind, title, type, size, duration_sec, at, created_at, deleted_on_phone_at, share_token_hash, share_nonce, share_expires_at; unique (device_id, phone_id). New columns `requests.note`, `requests.phone`.
+
+
+## Levels, safe browsing and the live map
+
+Added for the app's shared safe browsing, texting by level, location sharing, Check in and Ring phone.
+
+### Levels and one set of website rules
+
+A level (`little` "Little kid" ages 5 to 8, `big` "Big kid" 9 to 12, `teen` "Teen" 13 to 17) sets a kid's time limits,
+bedtimes, website rule, SafeSearch, YouTube Restricted Mode and who they can text, in one go. Any setting can be
+changed afterwards; the console lists what differs from the level and can put each back. A birthday only makes a
+suggestion: the server never changes a level by itself. Apps, the kid's website list and wake-up times are not part of a level.
+
+| | school day / weekend | bedtime school night / Fri, Sat | websites | blocked kinds | texting |
+| --- | --- | --- | --- | --- | --- |
+| Little kid | 60 / 90 min | 19:30 / 20:00 | `sites` | (all, unused) | `family` |
+| Big kid | 120 / 180 min | 20:30 / 21:00 | `filtered` | adult, gambling, violence, proxies, social, chat | `friends` |
+| Teen | 240 / 300 min | 22:30 / 23:00 | `filtered` | adult, gambling, proxies | `anyone` |
+
+Website rule (`web_mode`), the same for every device of the kid:
+
+- `sites`: only the kid's list (allowed `apps` rows of kind `site`). This is what "Only allowed websites" always was; `kids.only_allowed_sites` is kept equal to `web_mode = 'sites'`.
+- `filtered`: anything except the well-known sites and name words of the blocked kinds (`adult`, `gambling`, `violence`, `proxies`, `social`, `chat`, `games`, `shopping`) and websites a parent blocked by name.
+- `open`: anything except websites a parent blocked by name.
+
+The kid's list always wins. A word blocks a host only as a whole part of its name between dots or hyphens
+(`free-porn.net`, not `essex.ac.uk`). The pure logic and its tests: `server/src/levels.ts`, `test/levels.test.ts`.
+
+Kid-device API:
+
+- `POST /api/warden/sync` answer, new: `web: {mode, block:[host], words:[word]}` (every platform; `block` and `words` are what the mode needs, subdomains count), and for phones `texting.who: family|friends|anyone` and `location: {sharing, live, ring}` (below). `blockedSites` in the request is the phone's whole list of the last day every time: a `(device, host, at)` already stored is not stored again.
+- `POST /api/android/request` also takes `{site}` (cleaned to a bare host; 400 when it is none) → the usual `{status, id?, message}`; `allowed` when the site is on the kid's list already. A parent's yes puts the site on the list and takes it off the blocked list.
+
+Parent API (cookie session; another family's kid → 404):
+
+- `GET /api/kids/:id/safety` → `{kid:{id,name}, level, birthday, suggested, next:{level,on}|null, levels, changes:[{key,label,level,now}], settings:{schoolMinutes,offMinutes,schoolBedtime,otherBedtime,webMode,categories,safeSearch,youTube,texting}, blockPrivate, web:{mode,categories,blocked,allowed}, categories:[{id,name,sites}], devices:[{id,name,platform,lastSeenAt,appVersion}], blockedToday:[{host,at,devices,category}]}`. `schoolBedtime`/`otherBedtime` are `''` when bedtime is off.
+- `POST /api/kids/:id/safety/level` `{level, only?}` (`only`: one key of `settings`, put back to the level's value).
+- `PUT /api/kids/:id/safety/birthday` `{birthday: 'YYYY-MM-DD' | null}`.
+- `PUT /api/kids/:id/safety/web` `{mode?, categories?, safeSearch?, youTube?, blockPrivate?}`.
+- `POST /api/kids/:id/safety/site` `{host, allow, remove?}`: always allow (onto the kid's list), always block (at most 500), or with `remove` off both.
+- `PUT /api/kids/:id/safety/texting` `{who}`.
+- `PATCH /api/kids/:id` `onlyAllowedSites` still works: `true` sets `sites`; `false` sets `open` unless a filter is set.
+
+Console: each kid has a fifth page, "Levels and web" (`/kids/:id/levels`). "Safe browsing" in the menu is an overview of every kid with a link to that page.
+
+Migration `004_levels_web`: new columns `kids.level`, `birthday`, `web_mode`, `web_categories`, `web_blocked`, `texting_who` (default `friends`, the behaviour before). Existing kids: "Only allowed websites" on → `sites`; off → `open`, and the websites that were switched off for that kid become its blocked list. Nothing else is changed.
+
+### The live map
+
+The location of children. Rules, each with a test in `server/test/location-routes.test.ts`:
+
+- Every parent route is scoped to the signed-in family: another family gets 404, a signed-out visitor 401, a locked account 402. A device token opens no parent route.
+- A phone writes for the kid it is paired to; nothing in a body can name another kid.
+- A parent can switch sharing off per kid (default on). The phone hears it in `location.sharing`; anything it still sends is answered `200 {sharing:false, live:false}` and not kept. A check-in is then kept without a position.
+- Positions and arrive / leave are deleted after the kid's keep time: 1, 30 or 90 days, 30 by default. Check-ins after 90 days. At most 50,000 positions per kid. Housekeeping runs every 10 minutes; a shorter keep time counts at once.
+- A parent can clear a kid's location history. Removing a kid or a family removes everything; removing a phone removes its positions.
+- Nothing is public. No coordinates are sent to any other service (no address look-up) or put in emails.
+
+The phone (its token; Android only, a PC gets 404):
+
+- `POST /api/android/location` `{fixes:[{lat, lng, accuracy?, at?, battery?, charging?}]}` (1 to 30) or one fix as the body → `{sharing, live}`. `at` counts when it is within an hour of now. 120 calls a minute per phone.
+- `POST /api/android/checkin` `{kind: ok|pickup|help, lat?, lng?, accuracy?}` → `{ok, id?, message}`; the same kind again within a minute → `{ok, message}` without a new check-in. `pickup` and `help` make the phone "live" for up to 30 minutes or until a parent answers. The parent gets an email (who and what, no position) when Amazon SES is set up.
+- sync answer: `location: {sharing, live, ring}`. `live` while a parent has the map open (2 minutes after the last look). `ring` is an id that changes with every "Ring phone", sent for 10 minutes.
+
+Parents:
+
+- `GET /api/location[?live=1]` → `{kids:[{id,name,color,sharing,alerts,keepDays,live,phone,last:{lat,lng,accuracy,at,battery,charging,place:{id,name}|null}|null,trail:[[lat,lng,at]],events:[{placeName,kind,at}],ringing}], places:[{id,name,lat,lng,radius}], checkins:[{id,kidId,kind,lat,lng,at,answer,answeredAt}], tiles:{enabled,attribution,attributionUrl,maxZoom}, keepDaysOptions}`. Kids with an Android phone; today's trail (family time zone, fixes better than 250 m, newest 2000); check-ins of the last 12 hours.
+- `GET /api/kids/:id/location/trail?day=YYYY-MM-DD`, `PUT /api/kids/:id/location/settings` `{sharing?, alerts?, keepDays?}`, `DELETE /api/kids/:id/location`, `POST /api/kids/:id/ring` (6 a minute).
+- `GET|POST /api/places`, `PUT|DELETE /api/places/:id` `{name, lat, lng, radius (50 to 2000 m, default 150)}`, 50 per family. Arriving needs a fix inside the circle that is good to 250 m; leaving needs to be past it by 50 m or the fix's accuracy.
+- `POST /api/checkins/:id/answer` `{text}`.
+- `GET /api/map-tiles/:z/:x/:y.png`: a map tile, for signed-in parents only. The server fetches it from `MAP_TILE_URL` (a template with `{z}`, `{x}`, `{y}`; default the public OpenStreetMap servers; `off` = no tiles) with the User-Agent `FamilyScreenWarden/1.0 (parent console map; +https://familyscreenwarden.com; <PUBLIC_URL>)`, keeps it in `DATA_DIR/map-tiles` for 14 days (an old copy is used when the source is down), and never lets the folder pass `MAP_TILE_CACHE_MB` (default 512). Only PNG, JPEG or WebP of at most 1 MB is passed on. 300 tiles a minute per family; at most 4 fetches at a time; nothing is fetched ahead. The map shows `MAP_TILE_ATTRIBUTION` (default "© OpenStreetMap contributors") linking to `MAP_TILE_ATTRIBUTION_URL`.
+
+Console: "Map" in the menu (`/map`): the map (Leaflet, bundled; the browser loads nothing from other sites), a card per kid (place, time, accuracy, battery, last check-in, Ring phone, today's trail and arrivals), waiting check-ins on top with "On my way", places, and per kid: sharing, arrive / leave emails, keep time, "Clear location history".
+
+Tables (migration `005_kid_location`): `kid_location_settings` (kid, sharing, alerts, keep_days, live_until, ring_id, ring_at), `family_places`, `kid_locations`, `kid_place_state`, `kid_place_events`, `kid_checkins`; each with `account_id` except the state table.

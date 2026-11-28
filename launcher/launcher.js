@@ -352,6 +352,17 @@ document.addEventListener('click', (e) => {
   const d = t.dataset || {};
   if (d.close !== undefined) { closeAll(); parentPin = null; return; }
   if (d.callnum) { send({ cmd: 'call', num: d.callnum }); toast('Calling…'); return; }
+  // Check in (the live map): "I need help now" takes a second tap, so it isn't sent by accident.
+  if (d.checkin) {
+    if (d.checkin === 'help' && t.dataset.armed !== '1') {
+      t.dataset.armed = '1'; t.textContent = 'Tap again to send for help';
+      setTimeout(() => { t.dataset.armed = ''; t.textContent = 'I need help now'; }, 5000);
+      return;
+    }
+    if (d.checkin === 'help') { t.dataset.armed = ''; t.textContent = 'I need help now'; }
+    send({ cmd: 'checkin', kind: d.checkin });
+    return;
+  }
   if (d.sound) { send({ cmd: 'sound-mode', mode: d.sound }); return; }
   if (d.timeout) { send({ cmd: 'screen-timeout', sec: Number(d.timeout) }); return; }
   if (d.zoom) { send({ cmd: 'text-size', zoom: Number(d.zoom) }); return; }
@@ -538,6 +549,10 @@ function renderPhone() {
   $('nav-texts').setAttribute('aria-label', n ? `Texts, ${n} new` : 'Texts');
   setText($('lock-texts'), n ? `Texts (${n} new)` : 'Texts');
   $('lock-texts').classList.toggle('hidden', !own);
+  // Location sharing (the live map): the kid always sees it's on, and can check in.
+  const loc = p.location;
+  document.querySelectorAll('.ci').forEach((x) => x.classList.toggle('hidden', !loc || !loc.sharing));
+  document.querySelectorAll('.ci-text').forEach((x) => setText(x, loc?.live ? 'A grown-up is looking at where your phone is right now.' : 'Your grown-ups can see where your phone is.'));
   renderSound();
   renderCall();
   $('lock-fam').classList.toggle('hidden', !locked);
@@ -666,7 +681,8 @@ if (MODE === 'preview') {
   if (PHONE) S.phone = { emergency: '911', contacts: [{ id: 'c1', name: 'Mom', phone: '555-0102', always: true }, { id: 'c2', name: 'Dad', phone: '555-0107', always: true }, { id: 'c3', name: 'Grandma', phone: '555-0144', always: true }, { id: 'c4', name: 'Aunt Sam', phone: '555-0190', always: false }], messages: [{ id: 'x1', name: 'Mom', text: 'Pick you up at 3!', at: iso(12) }],
     texts: !params.has('oldtexts'), textsUnread: params.has('unread') ? 2 : 0, friends: [{ id: 'f1', name: 'Jake', phone: '555-0164' }],
     recent: [{ name: 'Mom', type: 'in', at: now - 3 * 3600e3, sec: 190 }, { name: 'Dad', type: 'missed', at: now - 6 * 3600e3, sec: 0 }, { name: 'Grandma', type: 'out', at: now - 26 * 3600e3, sec: 720 }],
-    sound: { mode: 'vibrate', media: 60, ring: 80, notif: 45, brightness: 70, timeout: 60, zoom: 100, canSet: true, rotate: true, canRotate: false } };
+    sound: { mode: 'vibrate', media: 60, ring: 80, notif: 45, brightness: 70, timeout: 60, zoom: 100, canSet: true, rotate: true, canRotate: false },
+    location: { sharing: !params.has('noshare'), live: params.has('live') } };
   if (PHONE && params.get('ringing') !== null) S.phone.call = { state: 'ringing', name: 'Mom', since: iso(0) };
   if (PHONE && params.get('oncall') !== null) S.phone.call = { state: 'active', name: 'Grandma', since: iso(2), muted: false, speaker: true };
   if (params.get('timeup') !== null) Object.assign(S.status, { state: 'locked', lockReason: 'time', generalSecondsLeft: 0 });

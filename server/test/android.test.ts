@@ -13,7 +13,7 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { unlockCode } from '../src/compat/logic';
 import { lockExpiredTrials, purgeExpired } from '../src/state';
-import { Client, createKid, pairDevice, resetDatabase, signIn, startServer, TEST_DATA_DIR, TODAY, WEDNESDAY_AFTERNOON, type Json, type Reply, type TestServer } from './helpers';
+import { Client, createKid, pairDevice, resetDatabase, signIn, startServer, startTileSource, TEST_DATA_DIR, TODAY, WEDNESDAY_AFTERNOON, type Json, type Reply, type TestServer, type TileSource } from './helpers';
 
 const TOKEN = 'publish-token-for-tests-0123456789abcdef';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -27,15 +27,18 @@ const sha = (b: Buffer): string => crypto.createHash('sha256').update(b).digest(
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), crypto.randomBytes(600)]);
 
 let server: TestServer;
+let tileSource: TileSource;
 
 before(async () => {
   await resetDatabase();
   // The server's own default: BILLING_ENABLED not set.
-  server = await startServer({ BILLING_ENABLED: '', PUBLISH_TOKEN: TOKEN });
+  tileSource = await startTileSource();
+  server = await startServer({ BILLING_ENABLED: '', PUBLISH_TOKEN: TOKEN, MAP_TILE_URL: tileSource.template });
 });
 
 after(async () => {
   await server.close();
+  await tileSource.close();
 });
 
 /** The app marks its two raw uploads with X-FSW-Upload: 1. Pass 'X-FSW-Upload': '' to leave the marker out. */
@@ -328,7 +331,10 @@ describe('the phone contract, end to end', () => {
     assert.deepEqual(s.phone.rules, rules);
     assert.deepEqual(s.phone.contacts.map((c: Json) => [c.name, c.phone, c.always]), [['Aunt Sam', '555-010-9025', false], ['Mom', '(555) 010-2231', true]]);
     assert.match(s.phone.contacts[0].id, UUID);
-    assert.deepEqual(s.texting, { friends: [], asked: [], blocked: [], drop: [] });
+    assert.deepEqual(s.texting, { friends: [], asked: [], blocked: [], drop: [], who: 'friends' });
+    // Safe browsing as it always was (only the kid's sites), and location sharing on until a parent switches it off.
+    assert.deepEqual(s.web, { mode: 'sites', block: [], words: [] });
+    assert.deepEqual(s.location, { sharing: true, live: false, ring: null });
     assert.deepEqual(s.apkInstalls, []);
     assert.deepEqual(s.update, { version: '1.0.7', url: '/api/android/download?v=1.0.7', sha256: sha(APK_107), size: APK_107.length });
 
@@ -820,6 +826,184 @@ describe('the phone contract, end to end', () => {
     assert.equal((await download(mv.url, { cookie: parent.cookie })).status, 404);
     assert.equal((await fetch(`${server.url}/m/${tok}`)).status, 404);
     assert.equal((await fetch(`${server.url}/m/${tok}/file`)).status, 404);
+  });
+
+  it('levels and safe browsing: a level, changes, blocked today, allow and block, ask from the phone', async () => {
+    const safety = async (): Promise<Json> => {
+      const r = await parent.get(`/api/kids/${kid}/safety`);
+      assert.equal(r.status, 200, r.text);
+      return r.body;
+    };
+    const put = (path: string, body: Json): Promise<Reply> => parent.send('PUT', `/api/kids/${kid}/safety/${path}`, body);
+    let sf = await safety();
+    assert.equal(sf.web.mode, 'sites');
+    assert.equal(sf.level, null);
+    assert.equal(sf.levels.length, 3);
+    assert.deepEqual((await sync()).web, { mode: 'sites', block: [], words: [] });
+
+    assert.equal((await parent.post(`/api/kids/${kid}/safety/level`, { level: 'big' })).status, 200);
+    sf = await safety();
+    assert.equal(sf.level, 'big');
+    assert.deepEqual(sf.changes, []);
+    assert.equal(sf.settings.schoolMinutes, 120);
+    assert.equal(sf.settings.schoolBedtime, '20:30');
+    // The phone sends its whole list of the last day with every sync (here twice): each website is kept once.
+    const at = new Date(WEDNESDAY_AFTERNOON.getTime() - 60_000).toISOString();
+    const blockedSites = [{ host: 'tiktok.com', at }, { host: 'old.example', at: new Date(WEDNESDAY_AFTERNOON.getTime() - 3 * 86400_000).toISOString() }];
+    await sync({ blockedSites });
+    let s = await sync({ blockedSites });
+    assert.equal(s.web.mode, 'filtered');
+    assert.ok(s.web.block.includes('tiktok.com'));
+    assert.ok(s.web.words.includes('porn'));
+    assert.equal(s.texting.who, 'friends');
+    const kept = await server.pool.query("SELECT count(*)::int AS n FROM blocked_events WHERE kid_id = $1 AND host = 'tiktok.com'", [kid]);
+    assert.equal(kept.rows[0].n, 1);
+
+    // A parent changes one thing: it shows as a change, and "put back" undoes it.
+    assert.equal((await put('texting', { who: 'family' })).status, 200);
+    assert.equal((await sync()).texting.who, 'family');
+    sf = await safety();
+    assert.deepEqual(sf.changes.map((c: Json) => c.key), ['texting']);
+    await parent.post(`/api/kids/${kid}/safety/level`, { level: 'big', only: 'texting' });
+    assert.deepEqual((await safety()).changes, []);
+
+    // Blocked today (from the phone), then "Allow": on the kid's list, off the block list.
+    sf = await safety();
+    assert.deepEqual(sf.blockedToday.map((b: Json) => b.host), ['tiktok.com']);
+    assert.equal(sf.blockedToday[0].category, 'Social media');
+    assert.deepEqual(sf.blockedToday[0].devices, ["Mia's phone"]);
+    assert.equal((await parent.post(`/api/kids/${kid}/safety/site`, { host: 'https://www.tiktok.com/@x', allow: true })).body.host, 'tiktok.com');
+    await parent.post(`/api/kids/${kid}/safety/site`, { host: 'badsite.example.com', allow: false });
+    s = await sync();
+    assert.ok(!s.web.block.includes('tiktok.com'));
+    assert.ok(s.web.block.includes('badsite.example.com'));
+    assert.ok(s.sites.some((x: Json) => x.host === 'tiktok.com'));
+
+    // "Ask a grown-up" on the phone's blocked screen (the host may still carry www. or capitals), and a birthday.
+    const asked = await phone.post('/api/android/request', { site: 'www.CoolMathGames.com' });
+    assert.equal(asked.status, 200, asked.text);
+    assert.equal(asked.body.status, 'sent');
+    assert.match(asked.body.id, UUID);
+    assert.equal((await phone.post('/api/android/request', { site: 'not a site' })).status, 400);
+    assert.equal((await phone.post('/api/android/request', { site: 'm.tiktok.com' })).body.status, 'allowed');
+    s = await sync();
+    assert.deepEqual(s.requests.find((r: Json) => r.id === asked.body.id), { id: asked.body.id, exe: 'site:coolmathgames.com', name: 'Website: coolmathgames.com', status: 'pending' });
+    assert.equal((await parent.post(`/api/requests/${asked.body.id}/decide`, { approve: true })).status, 200);
+    s = await sync();
+    assert.ok(s.sites.some((x: Json) => x.host === 'coolmathgames.com'));
+    assert.equal(s.requests.find((r: Json) => r.id === asked.body.id).status, 'allowed');
+
+    assert.equal((await put('birthday', { birthday: '2012-02-03' })).status, 200);
+    sf = await safety();
+    assert.equal(sf.suggested, 'teen');
+    assert.equal(sf.next.level.id, 'teen');
+    assert.equal((await put('web', { mode: 'sites', categories: [], safeSearch: true, youTube: true })).status, 200);
+    s = await sync();
+    // Only the kid's sites again: the phone does not use the block list in this mode, and no words come with it.
+    assert.equal(s.web.mode, 'sites');
+    assert.deepEqual(s.web.words, []);
+    // Back to how the earlier steps left it: no level-made bedtime surprises for the steps below.
+    await parent.patch(`/api/kids/${kid}`, { limitSchoolMinutes: 120, bedSchoolStart: '20:30', bedOtherStart: '21:30' });
+  });
+
+  it('live map: places, arrive and leave, live while watching, check-ins, ring, sharing off', async () => {
+    const mapOf = async (query = ''): Promise<Json> => {
+      const r = await parent.get(`/api/location${query}`);
+      assert.equal(r.status, 200, r.text);
+      return r.body;
+    };
+    const place = await parent.post('/api/places', { name: 'School', lat: 39.7392, lng: -104.9903, radius: 150 });
+    assert.equal(place.status, 201, place.text);
+    assert.match(place.body.place.id, UUID);
+    assert.deepEqual((await sync()).location, { sharing: true, live: false, ring: null });
+
+    // One position, then the app's usual form: a list of fixes with the fix time, battery and charging.
+    let sent = await phone.post('/api/android/location', { lat: 39.75, lng: -104.98, accuracy: 15, battery: 80 });
+    assert.equal(sent.status, 200, sent.text);
+    assert.deepEqual(sent.body, { sharing: true, live: false });
+    sent = await phone.post('/api/android/location', { fixes: [{ lat: 39.7393, lng: -104.9904, accuracy: 12.5, at: new Date().toISOString(), battery: 79, charging: false }] });
+    assert.deepEqual(sent.body, { sharing: true, live: false });
+    assert.equal((await phone.post('/api/android/location', { fixes: [{ lat: 139, lng: 0 }] })).status, 400);
+    assert.equal((await phoneClient().post('/api/android/location', { lat: 1, lng: 1 })).status, 401);
+
+    let map = await mapOf('?live=1');
+    let me = map.kids.find((k: Json) => k.id === kid);
+    assert.equal(me.name, 'Mia Test');
+    assert.equal(me.phone, "Mia's phone");
+    assert.deepEqual(me.last.place, { id: place.body.place.id, name: 'School' });
+    assert.equal(me.last.battery, 79);
+    assert.equal(me.last.accuracy, 12.5);
+    assert.ok(Math.abs(new Date(me.last.at).getTime() - Date.now()) < 60_000);
+    assert.equal(me.trail.length, 2);
+    assert.deepEqual(me.events.map((e: Json) => [e.kind, e.placeName]), [['arrive', 'School']]);
+    assert.equal(me.live, true);
+    assert.deepEqual(map.places, [{ id: place.body.place.id, name: 'School', lat: 39.7392, lng: -104.9903, radius: 150 }]);
+    assert.equal(map.tiles.maxZoom, 19);
+    assert.equal(typeof map.tiles.attribution, 'string');
+
+    // The map is open: the phone hears "live" in its next answer and in its sync.
+    sent = await phone.post('/api/android/location', { lat: 39.7393, lng: -104.9904, accuracy: 12 });
+    assert.equal(sent.body.live, true);
+    assert.equal((await sync()).location.live, true);
+    await phone.post('/api/android/location', { lat: 39.75, lng: -104.98, accuracy: 15 });
+    me = (await mapOf()).kids.find((k: Json) => k.id === kid);
+    assert.deepEqual(me.events.map((e: Json) => e.kind), ['leave', 'arrive']);
+    const trail = await parent.get(`/api/kids/${kid}/location/trail`);
+    assert.equal(trail.status, 200, trail.text);
+    assert.equal(trail.body.trail.length, 4);
+    assert.deepEqual(trail.body.events.map((e: Json) => e.kind), ['arrive', 'leave']);
+
+    // Check in: the kid gets words to read, the parents see it and answer.
+    const checkin = await phone.post('/api/android/checkin', { kind: 'pickup', lat: 39.75, lng: -104.98, accuracy: 12.5 });
+    assert.equal(checkin.status, 200, checkin.text);
+    assert.equal(checkin.body.ok, true);
+    assert.match(checkin.body.id, UUID);
+    assert.equal(typeof checkin.body.message, 'string');
+    assert.equal((await phone.post('/api/android/checkin', { kind: 'pickup' })).body.message, 'Sent already. Your parents have it.');
+    assert.equal((await phone.post('/api/android/checkin', { kind: 'wave' })).status, 400);
+    const ok = await phone.post('/api/android/checkin', { kind: 'ok' });
+    assert.equal(ok.status, 200);
+    map = await mapOf();
+    assert.deepEqual(map.checkins.map((c: Json) => c.kind).sort(), ['ok', 'pickup']);
+    const waiting = map.checkins.find((c: Json) => c.kind === 'pickup');
+    assert.deepEqual({ kidId: waiting.kidId, lat: waiting.lat, lng: waiting.lng, answer: waiting.answer, answeredAt: waiting.answeredAt }, { kidId: kid, lat: 39.75, lng: -104.98, answer: null, answeredAt: null });
+    assert.equal((await parent.post(`/api/checkins/${waiting.id}/answer`, { text: 'On my way' })).status, 200);
+    assert.equal((await mapOf()).checkins.find((c: Json) => c.id === waiting.id).answer, 'On my way');
+    // The parent was told by email as well: who and what, never coordinates.
+    await new Promise((r) => setTimeout(r, 50));
+    const notice = server.notices.find((n) => /come get me/.test(n.subject));
+    assert.ok(notice, 'a notice for the pickup check-in');
+    assert.equal(notice.email, 'cade@example.com');
+    assert.doesNotMatch(notice.subject + notice.text, /39\.7|104\.9/);
+
+    // Ring phone: an id that changes with every ring.
+    const ring = await parent.post(`/api/kids/${kid}/ring`);
+    assert.equal(ring.status, 200, ring.text);
+    assert.match(ring.body.message, /rings/);
+    const ringId = (await sync()).location.ring;
+    assert.match(ringId, UUID);
+    assert.equal((await sync()).location.ring, ringId, 'the same ring keeps its id');
+    await parent.post(`/api/kids/${kid}/ring`);
+    assert.notEqual((await sync()).location.ring, ringId);
+
+    // Sharing off: the phone is told (a 2xx, so it does not retry), and what it sends is not kept.
+    const before = (await mapOf()).kids.find((k: Json) => k.id === kid).trail.length;
+    assert.equal((await parent.send('PUT', `/api/kids/${kid}/location/settings`, { sharing: false, alerts: true, keepDays: 30 })).status, 200);
+    sent = await phone.post('/api/android/location', { lat: 1, lng: 1 });
+    assert.equal(sent.status, 200);
+    assert.deepEqual(sent.body, { sharing: false, live: false });
+    const off = (await sync()).location;
+    assert.equal(off.sharing, false);
+    assert.equal(off.live, false);
+    me = (await mapOf('?live=1')).kids.find((k: Json) => k.id === kid);
+    assert.equal(me.sharing, false);
+    assert.equal(me.live, false);
+    assert.equal(me.trail.length, before);
+    assert.equal((await parent.send('PUT', `/api/kids/${kid}/location/settings`, { sharing: true })).status, 200);
+
+    assert.equal((await parent.del(`/api/places/${place.body.place.id}`)).status, 200);
+    assert.equal((await parent.get('/api/map-tiles/2/9/1.png')).status, 404, 'a tile that does not exist');
+    assert.equal((await parent.get('/api/map-tiles/0/0/0.png')).status, 200);
   });
 
   it('an APK: upload, push, the phone downloads and installs it, and it is allowed', async () => {

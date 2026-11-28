@@ -254,7 +254,13 @@ export function parentRoutes(ctx: Ctx): Router {
     if (body.has('bedOtherStart')) set('bed_other_start', clock(body, 'bedOtherStart', 'Other night bedtime'));
     if (body.has('bedOtherEnd')) set('bed_other_end', clock(body, 'bedOtherEnd', 'Other night wake-up time'));
     if (body.has('bedtimeEnabled')) set('bedtime_enabled', body.bool('bedtimeEnabled', 'Bedtime on/off'));
-    if (body.has('onlyAllowedSites')) set('only_allowed_sites', body.bool('onlyAllowedSites', 'Only allowed websites'));
+    if (body.has('onlyAllowedSites')) {
+      // The same thing as the website rule on "Levels and web": on is 'sites'; off opens the web unless a filter is set.
+      const only = body.bool('onlyAllowedSites', 'Only allowed websites');
+      set('only_allowed_sites', only);
+      values.push(only);
+      sets.push(`web_mode = CASE WHEN $${values.length} THEN 'sites' WHEN web_mode = 'sites' THEN 'open' ELSE web_mode END`);
+    }
     if (body.has('safeSearch')) set('safe_search', body.bool('safeSearch', 'SafeSearch'));
     if (body.has('youtubeRestricted')) set('youtube_restricted', body.bool('youtubeRestricted', 'YouTube Restricted Mode'));
     if (body.has('blockPrivate')) set('block_private', body.bool('blockPrivate', 'Block private browsing'));
@@ -601,6 +607,10 @@ export function parentRoutes(ctx: Ctx): Router {
             await db.query('UPDATE apps SET allowed = true WHERE id = $1', [twin.id]);
             known = true;
           }
+        }
+        // A website a parent says yes to is no longer on the kid's blocked list.
+        if (request.kind === 'site') {
+          await db.query('UPDATE kids SET web_blocked = array_remove(web_blocked, $3) WHERE id = $1 AND account_id = $2', [request.kid_id, acc.id, identifier]);
         }
         if (!known) {
           await db.query(

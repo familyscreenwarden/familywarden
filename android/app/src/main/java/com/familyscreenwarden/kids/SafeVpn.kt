@@ -10,18 +10,21 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.familyscreenwarden.kids.core.Dns
 import com.familyscreenwarden.kids.core.SafeSearch
+import com.familyscreenwarden.kids.core.WebFilter
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.time.LocalTime
 import java.util.concurrent.Executors
 
 /**
  * Safe browsing for every app on the phone: a VPN that carries only DNS (nothing else goes through it, so it's light).
  * Google, Bing and DuckDuckGo searches get SafeSearch, YouTube gets Restricted Mode (as on Windows), and encrypted-DNS
- * services that would skip this are refused, so apps fall back to normal DNS. The device owner makes it always-on
+ * services that would skip this are refused, so apps fall back to normal DNS. Blocked websites (a filtered web, the
+ * same list as Windows) get "no such name". The device owner makes it always-on
  * with "block connections without VPN", so it can't be turned off.
  */
 class SafeVpn : VpnService() {
@@ -76,6 +79,12 @@ class SafeVpn : VpnService() {
     private fun answer(q: ByteArray): ByteArray? {
         val query = Dns.parseQuery(q) ?: return forward(q)
         if (SafeSearch.isEncryptedDns(query.name)) return Dns.nxdomain(q, query)
+        // Safe browsing's blocked sites (the same list as the Windows app), for every app on the phone.
+        val s = Kids.snap
+        if (s != null && WebFilter.dnsBlocked(query.name, s.web, s.sites, LocalTime.now())) {
+            if (query.type == Dns.A || query.type == Dns.AAAA) Kids.siteBlocked(query.name)
+            return Dns.nxdomain(q, query)
+        }
         val target = SafeSearch.cname(query.name, Kids.snap?.safeSearch)
         if (target != null && (query.type == Dns.A || query.type == Dns.AAAA)) {
             val up = forward(Dns.rename(q, query, target)) ?: return null

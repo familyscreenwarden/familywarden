@@ -41,7 +41,10 @@ import {
   looksLike,
   requireUploadMarker,
 } from '../media';
+import { onList } from '../levels';
 import { downloadRelease, latestRelease } from '../releases';
+import { allowedHosts, cleanHost, webFor } from './levels';
+import { locationExtras, locationRoutes } from './location';
 import { mediaRoutes } from './media';
 import { localTime, type RuleKid } from '../rules';
 import {
@@ -156,6 +159,8 @@ export interface CompatRouters {
   watch: Router;
   /** The parents' side of the kids' photos and videos. */
   mediaParent: Router;
+  /** The parents' side of the live map (places, check-ins, Ring phone, map tiles). */
+  locationParent: Router;
 }
 
 /** Who is calling with a device token: the device and its family. Every kid-device route starts here. */
@@ -184,6 +189,9 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
   const auth = (req: Request): Promise<Auth> => deviceAuth(pool, req);
   const media = mediaRoutes(ctx, auth);
   android.use('/media', media.phone);
+  // Where the phone is, and check-ins (routes/location.ts).
+  const location = locationRoutes(ctx, auth);
+  android.use(location.phone);
 
   // ---------------------------------------------------------------- setup: check the code, pair
 
@@ -400,6 +408,8 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
       bedtime: bed ? { at: bed.at.toISOString(), until: bed.until.toISOString(), warnMinutes: WARN_MINUTES } : null,
       fastSync: installs.rows.some((i) => i.recent),
       safeSearch: { search: kid.safe_search, youTube: kid.youtube_restricted },
+      // Safe browsing, the same for phones and PCs: only the kid's sites, a filtered web or an open web (levels.ts).
+      web: webFor(kid, apps),
       launcher: { enabled: true, layout: kid.launcher_layout, theme: kid.launcher_theme, lookLocked: kid.launcher_look_locked },
       update: null,
     };
@@ -426,7 +436,11 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
         asked: asked.rows.map((r) => ({ name: r.detail, phone: r.identifier ?? '', status: r.status })),
         blocked: blockedNums.rows.map((b) => b.num),
         drop: drops.rows.map((d) => d.phone_id),
+        // Who the kid can text: family only, family and approved friends, or anyone (the kid's level).
+        who: kid.texting_who,
       };
+      // Location sharing on or off, "live" while a parent has the map open, and Ring phone.
+      Object.assign(answer, await locationExtras(pool, device));
       answer.apkInstalls = installs.rows.map((i) => ({ id: i.id, name: i.name, url: `/api/android/apk/${i.id}`, sha256: i.sha256, size: i.size }));
       answer.update = release
         ? { version: release.version, url: `/api/android/download?v=${encodeURIComponent(release.version)}`, sha256: release.sha256, size: release.size }
@@ -604,8 +618,10 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
 
       if (blockedSites.length > 0) {
         await db.query(
+          // The app sends its whole list of the last day with every sync: only what is not here yet is added.
           `INSERT INTO blocked_events (account_id, kid_id, device_id, host, at)
-           SELECT $1, $2, $3, t.host, t.at FROM unnest($4::text[], $5::timestamptz[]) AS t(host, at)`,
+           SELECT DISTINCT $1::uuid, $2::uuid, $3::uuid, t.host, t.at FROM unnest($4::text[], $5::timestamptz[]) AS t(host, at)
+            WHERE NOT EXISTS (SELECT 1 FROM blocked_events b WHERE b.device_id = $3 AND b.host = t.host AND b.at = t.at)`,
           [account.id, device.kid_id, device.id, blockedSites.map((b) => b.host), blockedSites.map((b) => b.at.toISOString())],
         );
       }
@@ -708,6 +724,22 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
     const a = await auth(req);
     takeAsk(a.device);
     const body = new Body(req.body);
+    // A blocked website ("Ask a grown-up" on the "This site is blocked" screen): yes puts it on the kid's list.
+    const site = clean(body.raw('site'), 255);
+    if (site) {
+      const host = cleanHost(site);
+      if (!host) throw new HttpError(400, 'That is not a website.');
+      const listed = await pool.query<{ kind: 'site'; allowed: boolean; identifier: string }>(
+        "SELECT kind, allowed, identifier FROM apps WHERE account_id = $1 AND kid_id = $2 AND kind = 'site' AND allowed",
+        [a.account.id, a.device.kid_id],
+      );
+      if (onList(host, allowedHosts(listed.rows))) {
+        res.json({ status: 'allowed', message: 'That website is allowed already. Give it a moment.' } satisfies Asked);
+        return;
+      }
+      res.json(await ask(a, { kind: 'site', minutes: null, detail: host, identifier: host }));
+      return;
+    }
     const pkg = clean(body.raw('package'), 200);
     if (!isPackageName(pkg)) throw new HttpError(400, 'That is not an app.');
     const name = clean(body.raw('name'), 120) || pkg;
@@ -1080,5 +1112,5 @@ ${code ? `<p style="margin-top:18px">If the app asks, your setup code is:</p><di
     res.status(201).json({ ok: true, id: made.rows[0]?.id ?? id });
   }
 
-  return { warden, android, textMediaUpload, mediaUpload: media.upload, watch: media.watch, mediaParent: media.parent };
+  return { warden, android, textMediaUpload, mediaUpload: media.upload, watch: media.watch, mediaParent: media.parent, locationParent: location.parent };
 }

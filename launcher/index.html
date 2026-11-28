@@ -162,6 +162,11 @@
 <div class="ov" id="d-family"><div class="dlg">
   <h2 id="d-family-h">Phone</h2>
   <button class="btn danger" data-act="emergency">Emergency call</button>
+  <!-- Check in (the live map in the parent console; phones only, shown when location sharing is on) -->
+  <div class="ci call-only hidden">
+    <p class="ci-note"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="ci-text">Your grown-ups can see where your phone is.</span></p>
+    <div class="ci-btns"><button class="btn" data-checkin="ok">I’m here and I’m OK</button><button class="btn" data-checkin="pickup">Please come get me</button><button class="btn danger ci-help" data-checkin="help">I need help now</button></div>
+  </div>
   <h3 class="fam-h">Family</h3>
   <p class="fam-note">Family always works, even when your time is up.</p>
   <div class="fam-list" id="fam-list"></div>
@@ -244,6 +249,10 @@
     <div class="fam-list" id="lock-fam-list"></div>
     <div class="fam-msgs hidden" id="lock-fam-msgs"></div>
     <button class="btn hidden" data-act="texts" id="lock-texts">Texts</button>
+    <div class="ci hidden">
+      <p class="ci-note"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span class="ci-text">Your grown-ups can see where your phone is.</span></p>
+      <div class="ci-btns"><button class="btn" data-checkin="ok">I’m here and I’m OK</button><button class="btn" data-checkin="pickup">Please come get me</button><button class="btn danger ci-help" data-checkin="help">I need help now</button></div>
+    </div>
   </section>
   <div class="lock-acts day-only">
     <button class="btn line-acc" data-ask="time:15">Ask for 15 more minutes</button>

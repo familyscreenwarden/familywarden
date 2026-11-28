@@ -16,9 +16,11 @@ object TextRules {
         return if (d.length > 10) d.takeLast(10) else d
     }
 
-    class People(contacts: List<Contact>, friends: List<Friend>, blocked: List<String>) {
+    /** who: "family" (friends don't count), "friends", or "anyone" (texts from new numbers are shown, not held). */
+    class People(contacts: List<Contact>, friends: List<Friend>, blocked: List<String>, who: String = "friends") {
         val family = contacts.associateBy { key(it.phone) }.filterKeys { it.isNotEmpty() }
-        val friends = friends.associateBy { key(it.phone) }.filterKeys { it.isNotEmpty() }
+        val friends = if (who == "family") emptyMap() else friends.associateBy { key(it.phone) }.filterKeys { it.isNotEmpty() }
+        val anyone = who == "anyone"
         val blocked = blocked.map { key(it) }.toSet()
         fun name(k: String): String? = family[k]?.name ?: friends[k]?.name
         fun known(k: String) = k in family || k in friends
@@ -28,7 +30,7 @@ object TextRules {
     fun status(parts: Collection<String>, p: People, locked: Boolean): String = when {
         parts.isEmpty() -> HELD
         parts.any { it in p.blocked } -> BLOCKED
-        parts.any { !p.known(it) } -> HELD
+        !p.anyone && parts.any { !p.known(it) } -> HELD
         locked && parts.any { k -> p.family[k]?.always != true } -> WAITING
         else -> SHOWN
     }

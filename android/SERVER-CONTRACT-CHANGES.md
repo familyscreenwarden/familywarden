@@ -145,3 +145,111 @@ check and sends nothing new to the server (the PIN is checked with `POST /api/wa
 ## Not called by this app
 
 Family feed, cheers, the earlier product's game and its 3D models: still removed.
+
+---
+
+# 28 November: levels and shared safe browsing, texting by level, location (live map, Check in, Ring phone)
+
+Everything above still holds. This section lists every call, field and shape that is new or changed in this update.
+Auth, error shape and the `Accept` header are as above (`Authorization: Bearer <the phone's token>`).
+
+## Where this differs from the earlier app's contract (read this first)
+
+**Nothing on the wire differs.** Every path, field name, value and answer below is the earlier app's, with
+`/api/warden/...` where it had its shared prefix. No name in this update carried the earlier product's name, so none
+was changed. Inside the app only: the calls go through `WardenApi.post`, and one private variable in `Where.kt` was
+renamed (`liveFromServer`).
+
+One thing to know rather than a difference: the pref file `where` (key `ring`) and the notification channel `kids`
+are the earlier names and say nothing about the earlier product, so they were kept.
+
+## New calls
+
+### 9. `POST /api/android/location`: where the phone is
+
+- **When:** only when the phone is paired, has the location permission, and the last sync answer did not say
+  `location.sharing: false`. One position every 5 minutes; while "live" (see `location.live` below, this call's own
+  answer, or 30 minutes after a "pickup" / "help" check-in) one call about every 5 seconds with the positions since
+  the last call. Positions that could not be sent (offline) wait in memory, at most 30, and go with the next call.
+- **Body:**
+
+  ```json
+  { "fixes": [ { "lat": 41.8781, "lng": -87.6298, "accuracy": 12.5, "at": "2026-11-28T15:04:05Z", "battery": 81, "charging": false } ] }
+  ```
+
+  1 to 30 fixes, oldest first. `accuracy` (metres) is left out when Android gives none. `at` is the fix's own time
+  (ISO 8601, UTC). `battery` is 0 to 100.
+- **Answer:** `{ "sharing": true, "live": false }`. The app reads only `live`: `true` keeps the 5-second updates
+  going until an answer (or a sync) says otherwise. Any 2xx counts as sent. On an error or no connection the app
+  keeps the newest 10 and tries again 5 seconds later (there is no back-off: answer 2xx with
+  `{ "sharing": false, "live": false }` when sharing is off rather than an error).
+
+### 10. `POST /api/android/checkin`: "I'm here and I'm OK" / "Please come get me" / "I need help now"
+
+- **When:** the kid taps one of the three buttons in the Phone menu or on the lock screen ("help" needs two taps).
+- **Body:** `{ "kind": "ok" | "pickup" | "help", "lat": 41.8781, "lng": -87.6298, "accuracy": 12.5 }`. `lat`, `lng`
+  and `accuracy` are left out when the phone has no position (no permission, or none found in 20 seconds).
+- **Answer:** `{ "message": "words for the kid" }`, shown as a toast as they are ("Sent." when missing). The earlier
+  server answered `{ ok: true, id, message }` and, for the same kind twice within a minute,
+  `{ ok: true, message: "Sent already. Your grown-ups have it." }`. Errors: the `error` text is shown; with no
+  connection the kid reads "Can't reach Family Screen Warden. Call a grown-up instead."
+- After "pickup" or "help" the phone sends live positions (call 9) for 30 minutes on its own, whatever the server
+  says, unless sharing is off.
+
+## Changed calls
+
+### 11. `POST /api/android/request`: now also a blocked website
+
+- **When (new):** "Ask a grown-up" on the "This site is blocked" screen.
+- **Body (new form):** `{ "site": "tiktok.com" }` (the host as the phone saw it; from the built-in browser it can still carry `www.` or capitals, so clean it). The app form
+  `{ "package": "...", "name": "..." }` is unchanged.
+- **Answer:** the same `{ "status": "sent" | "pending" | "allowed" | ..., "id": "...", "message": "..." }` as for an
+  app. With `sent` / `pending` and an `id` the app remembers the request (as `site:<host>`) and syncs soon after;
+  `message` is shown under the button. A yes should put the site on the kid's `sites` list (on every device).
+
+### 12. `POST /api/warden/sync`: one new request field, three additions to the answer
+
+**Request, new field `blockedSites`** (always present, may be empty; at most 40, newest first; the last 24 hours):
+
+```json
+"blockedSites": [ { "host": "tiktok.com", "at": "2026-11-28T15:04:05Z" } ]
+```
+
+It is the whole current list every time (replace, don't append). `host` ≤ 200 characters.
+
+**Answer, new object `web`** (safe browsing, the same object the Windows app gets; when missing the app behaves as
+before: only the kid's sites):
+
+```json
+"web": { "mode": "sites" | "filtered" | "open", "block": ["tiktok.com", "…"], "words": ["casino", "…"] }
+```
+
+- `sites`: only the hosts in the kid's `sites` (in their hours). `block` and `words` are not used.
+- `filtered` / `open`: anything except a host in `block` (subdomains too) or a name with one of `words` as a whole
+  part between dots or hyphens. The app treats the two modes alike; the server sends the right `block` / `words`
+  for each. The kid's `sites` always win, in their hours.
+- Where it is applied: the DNS filter for every app (only in `filtered` / `open`), the built-in browser, and Chrome's
+  policies (`URLBlocklist` = the first 1000 of `block` in `filtered` / `open`; `words` can't be given to Chrome).
+
+**Answer, new object `location`** (when missing: sharing is on, not live, no ring):
+
+```json
+"location": { "sharing": true, "live": false, "ring": "id-or-null" }
+```
+
+- `sharing: false` stops all location calls and hides the Check in block.
+- `live: true` while a grown-up has the map open: positions every 5 seconds, and the kid's Phone menu says so.
+- `ring`: an id that changes with every Ring phone. A new id (not the one the phone rang for last, kept across
+  restarts) rings loudly for 30 seconds, even on mute. Send `null` once the ring is old, or the same id; the phone
+  rings once per id.
+
+**Answer, new field `texting.who`**: `"family" | "friends" | "anyone"` (default `"friends"`, the behaviour before).
+`family`: approved friends don't count (their texts are held). `anyone`: texts from unknown numbers are shown
+(status `shown` in the sync's `texts`) instead of held; `blocked` still wins.
+
+### 13. Launcher state (no server change)
+
+`POST /api/warden/launcher` and `/launcher/act` are unchanged. The page gets `phone.location = { sharing, live }`
+from the phone itself (`sharing` is the server's flag and the permission together). New page → app messages:
+`checkin` with `kind` (`ok` | `pickup` | `help`), and `stop-ring` (the app accepts it; the page does not send it
+yet, as in the earlier app).

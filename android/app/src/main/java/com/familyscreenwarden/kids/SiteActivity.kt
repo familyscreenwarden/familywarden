@@ -12,11 +12,10 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.familyscreenwarden.kids.core.Sites
+import com.familyscreenwarden.kids.core.WebFilter
 import java.time.LocalTime
 
 /**
@@ -59,7 +58,8 @@ class SiteActivity : ComponentActivity() {
                 val h = req.url.host ?: return true
                 if (req.url.scheme !in setOf("http", "https")) return true
                 if (allowed(h)) return false
-                Toast.makeText(this@SiteActivity, "$h isn't on your list. Ask a grown-up.", Toast.LENGTH_SHORT).show()
+                Kids.siteBlocked(h, notify = false)
+                startActivity(BlockedActivity.intent(this@SiteActivity, h))
                 return true
             }
         }
@@ -70,13 +70,10 @@ class SiteActivity : ComponentActivity() {
         })
     }
 
+    /** The kid's sites, or with a filtered web anything that isn't blocked (WebFilter, the same as Chrome and Windows). */
     private fun allowed(host: String): Boolean {
-        val h = Sites.normalize(host)
-        val now = LocalTime.now()
-        return Kids.snap?.sites?.any { r ->
-            val rh = Sites.normalize(r.host)
-            rh.isNotEmpty() && (h == rh || h.endsWith(".$rh")) && Sites.inWindow(r.from, r.to, now)
-        } == true
+        val s = Kids.snap ?: return false
+        return !WebFilter.blocked(host, s.web, s.sites, LocalTime.now())
     }
 
     override fun onResume() {

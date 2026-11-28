@@ -10,6 +10,7 @@ import { authRoutes } from './routes/auth';
 import { billingRoutes, stripeWebhook } from './routes/billing';
 import { compatRoutes } from './routes/compat';
 import { deviceRoutes } from './routes/device';
+import { levelRoutes } from './routes/levels';
 import { parentRoutes } from './routes/parent';
 import { apkUpload, phoneRoutes } from './routes/phone';
 import { latestReleaseRoute, publishRelease } from './releases';
@@ -46,6 +47,7 @@ export function createApp(options: AppOptions): express.Express {
     stripe: new StripeClient(config, options.fetchImpl),
     now: options.now ?? (() => new Date()),
     ipLimits: { ...DEFAULT_IP_LIMITS, ...options.ipLimits },
+    fetchImpl: options.fetchImpl ?? fetch,
   };
 
   const app = express();
@@ -89,7 +91,14 @@ export function createApp(options: AppOptions): express.Express {
 
   // A broad per-address limit against runaway clients; the tight limits live on the single routes.
   const perIp = new RateLimiter(ctx.ipLimits.api, 60 * 1000);
+  const tilesPerIp = new RateLimiter(ctx.ipLimits.api * 2, 60 * 1000);
   app.use('/api', (req: Request, _res: Response, next: NextFunction) => {
+    // One look at the map is dozens of small pictures: tiles are counted apart (and again per family, in the route).
+    if (req.path.startsWith('/map-tiles/')) {
+      if (!tilesPerIp.take(req.ip ?? 'unknown')) throw new HttpError(429, 'Too many requests. Please wait a minute and try again.');
+      next();
+      return;
+    }
     if (!perIp.take(req.ip ?? 'unknown')) throw new HttpError(429, 'Too many requests. Please wait a minute and try again.');
     next();
   });
@@ -133,7 +142,7 @@ export function createApp(options: AppOptions): express.Express {
   // Everything below needs a signed-in parent. Billing stays open to locked accounts; the rest answers 402.
   app.use('/api', requireAccount(ctx));
   app.use('/api', billingRoutes(ctx));
-  app.use('/api', requireUnlocked, parentRoutes(ctx), phoneRoutes(ctx), compat.mediaParent);
+  app.use('/api', requireUnlocked, parentRoutes(ctx), phoneRoutes(ctx), compat.mediaParent, levelRoutes(ctx), compat.locationParent);
 
   app.use('/api', (_req: Request, _res: Response) => {
     throw new HttpError(404, 'That address does not exist.');

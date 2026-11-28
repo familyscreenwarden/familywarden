@@ -345,3 +345,16 @@ body[data-phone="1"] .phonenav{display:grid;grid-template-columns:repeat(5,minma
   body[data-phone="1"] .shield.big{width:48px;height:56px}
   body[data-phone="1"] .callbar.show{left:max(10px,calc(50vw - 280px));right:max(10px,calc(50vw - 280px))}
 }
+
+/* ---- Check in (the live map in the parent console): the Phone menu and the lock screen ---- */
+.ci{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:8px;background:var(--inset)}
+.ci .ci-note,.dlg .ci p.ci-note{margin:0;font-size:13px;color:var(--muted);display:flex;align-items:flex-start;gap:8px;text-align:left}
+.ci-note svg{flex:none;color:var(--acc-soft);margin-top:1px}
+.ci-btns{display:grid;gap:8px}
+.ci-btns .btn{justify-content:flex-start;text-align:left;font-weight:500}
+.ci-btns .ci-help[data-armed="1"]{background:#7f1d1d;color:#fff;font-weight:600}
+.lock-fam .ci{background:var(--inset)}
+@media (orientation: landscape) and (min-width: 700px) {
+  .ci-btns{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .ci-btns .btn{justify-content:center;text-align:center;padding:0 8px}
+}

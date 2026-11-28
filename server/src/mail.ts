@@ -80,6 +80,11 @@ export function signSigV4(input: SigV4Input): Record<string, string> {
 export interface Mailer {
   /** Sends the sign-in link. Must not throw for delivery problems the parent cannot fix; it logs them. */
   sendSignInLink(email: string, link: string): Promise<void>;
+  /**
+   * A short notice to the parent (a kid checked in, arrived at or left a place). Never throws. Without Amazon SES
+   * nothing is sent and nothing about the kid is written to the log.
+   */
+  sendNotice?(email: string, subject: string, text: string): Promise<void>;
 }
 
 function escapeHtml(s: string): string {
@@ -107,6 +112,18 @@ export function signInEmail(link: string): { subject: string; text: string; html
   return { subject, text, html };
 }
 
+/** A notice as an email: the words, and a button to the console. No place and no coordinates beyond what the text says. */
+export function noticeEmail(subject: string, text: string, consoleUrl: string): { subject: string; text: string; html: string } {
+  const link = `${consoleUrl}/map`;
+  const html =
+    `<div style="font-family:Inter,Arial,sans-serif;font-size:15px;color:#111;line-height:1.5">` +
+    `<p>${escapeHtml(text)}</p>` +
+    `<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#34d399;color:#06281c;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600">Open the map</a></p>` +
+    `<p style="color:#555;font-size:13px">You get this because location sharing is on for your kid in Family Screen Warden. Switch it off on the Map page.</p>` +
+    `</div>`;
+  return { subject, text: `${text}\n\nOpen the map: ${link}`, html };
+}
+
 /** Amazon SES v2 SendEmail over plain fetch, or the console when SES is not configured. */
 export function createMailer(config: Config, fetchImpl: typeof fetch = fetch): Mailer {
   const ses = config.ses;
@@ -117,40 +134,41 @@ export function createMailer(config: Config, fetchImpl: typeof fetch = fetch): M
       },
     };
   }
-  return {
-    async sendSignInLink(email, link) {
-      const mail = signInEmail(link);
-      const body = JSON.stringify({
-        FromEmailAddress: ses.from,
-        Destination: { ToAddresses: [email] },
-        Content: {
-          Simple: {
-            Subject: { Data: mail.subject, Charset: 'UTF-8' },
-            Body: { Text: { Data: mail.text, Charset: 'UTF-8' }, Html: { Data: mail.html, Charset: 'UTF-8' } },
-          },
+  const send = async (email: string, mail: { subject: string; text: string; html: string }, what: string): Promise<void> => {
+    const body = JSON.stringify({
+      FromEmailAddress: ses.from,
+      Destination: { ToAddresses: [email] },
+      Content: {
+        Simple: {
+          Subject: { Data: mail.subject, Charset: 'UTF-8' },
+          Body: { Text: { Data: mail.text, Charset: 'UTF-8' }, Html: { Data: mail.html, Charset: 'UTF-8' } },
         },
-      });
-      const url = `https://email.${ses.region}.amazonaws.com/v2/email/outbound-emails`;
-      const headers = signSigV4({
-        method: 'POST',
-        url,
-        headers: { 'content-type': 'application/json' },
-        body,
-        region: ses.region,
-        service: 'ses',
-        accessKeyId: ses.accessKeyId,
-        secretAccessKey: ses.secretAccessKey,
-      });
-      delete headers['host']; // fetch sets it
-      try {
-        const res = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
-        if (!res.ok) {
-          const detail = (await res.text()).slice(0, 300);
-          console.error(`[mail] SES refused the sign-in email (${res.status}): ${detail}`);
-        }
-      } catch (err) {
-        console.error('[mail] Could not reach SES:', err instanceof Error ? err.message : err);
+      },
+    });
+    const url = `https://email.${ses.region}.amazonaws.com/v2/email/outbound-emails`;
+    const headers = signSigV4({
+      method: 'POST',
+      url,
+      headers: { 'content-type': 'application/json' },
+      body,
+      region: ses.region,
+      service: 'ses',
+      accessKeyId: ses.accessKeyId,
+      secretAccessKey: ses.secretAccessKey,
+    });
+    delete headers['host']; // fetch sets it
+    try {
+      const res = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) {
+        const detail = (await res.text()).slice(0, 300);
+        console.error(`[mail] SES refused the ${what} (${res.status}): ${detail}`);
       }
-    },
+    } catch (err) {
+      console.error('[mail] Could not reach SES:', err instanceof Error ? err.message : err);
+    }
+  };
+  return {
+    sendSignInLink: (email, link) => send(email, signInEmail(link), 'sign-in email'),
+    sendNotice: (email, subject, text) => send(email, noticeEmail(subject, text, config.publicUrl), 'notice email'),
   };
 }

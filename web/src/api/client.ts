@@ -2,6 +2,7 @@ import type {
   Account, AndroidApp, Apk, AppPatch, Billing, ChatMessage, Chore, ChoreApproval, ChoreInput, ContactInput, Dashboard, Device, Kid, KidDetail,
   KidMedia, KidPatch, KidPhone, KidRequest, KidTexts, LauncherLook, NewApp, PairingCode, PhoneRules, PhoneText, Platform, Report, SetupQr,
   TimeCode, UnlockCode, WifiInput,
+  FamilyMap, KidSafety, KidTrail, LevelId, LocationSettings, MapPlace, TextingWho, WebPatch,
 } from './types';
 
 export class ApiError extends Error {
@@ -159,6 +160,24 @@ export function createApi(fetchFn: FetchLike, hooks: ApiHooks = {}) {
     uploadApk: (name: string, file: File) => request<{ apk: Apk }>('POST', `/api/apks/upload?name=${id(name)}`, undefined, { data: file, name: file.name }),
     deleteApk: (aId: string) => del<unknown>(`/api/apks/${id(aId)}`),
     pushApk: (aId: string, kidIds: string[]) => post<{ phones: number; pushed: number }>(`/api/apks/${id(aId)}/push`, { kidIds }),
+
+    // Levels and safe browsing.
+    kidSafety: (kidId: string) => get<KidSafety>(`/api/kids/${id(kidId)}/safety`),
+    useLevel: (kidId: string, level: LevelId, only?: string) => post<unknown>(`/api/kids/${id(kidId)}/safety/level`, only ? { level, only } : { level }),
+    saveBirthday: (kidId: string, birthday: string | null) => put<unknown>(`/api/kids/${id(kidId)}/safety/birthday`, { birthday }),
+    saveWeb: (kidId: string, b: WebPatch) => put<unknown>(`/api/kids/${id(kidId)}/safety/web`, b),
+    siteRule: (kidId: string, host: string, allow: boolean, remove = false) => post<{ host: string }>(`/api/kids/${id(kidId)}/safety/site`, { host, allow, remove }),
+    saveTexting: (kidId: string, who: TextingWho) => put<unknown>(`/api/kids/${id(kidId)}/safety/texting`, { who }),
+
+    // The live map of the kids' phones.
+    familyMap: (live: boolean) => get<FamilyMap>(`/api/location${live ? '?live=1' : ''}`),
+    kidTrail: (kidId: string, day: string) => get<KidTrail>(`/api/kids/${id(kidId)}/location/trail?day=${id(day)}`),
+    saveLocationSettings: (kidId: string, b: LocationSettings) => put<unknown>(`/api/kids/${id(kidId)}/location/settings`, b),
+    clearLocation: (kidId: string) => del<{ removed: number }>(`/api/kids/${id(kidId)}/location`),
+    ringPhone: (kidId: string) => post<{ message: string }>(`/api/kids/${id(kidId)}/ring`),
+    createPlace: (b: Omit<MapPlace, 'id'>) => post<{ place: MapPlace }>('/api/places', b),
+    deletePlace: (pId: string) => del<unknown>(`/api/places/${id(pId)}`),
+    answerCheckIn: (cId: string, text: string) => post<unknown>(`/api/checkins/${id(cId)}/answer`, { text }),
 
     billing: () => get<Billing>('/api/billing'),
     checkout: (interval: 'month' | 'year') => post<{ url: string }>('/api/billing/checkout', { interval }),

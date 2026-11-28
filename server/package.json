@@ -15,7 +15,7 @@
     "seed": "tsx src/seed.ts",
     "migrate": "tsx src/migrate-cli.ts",
     "test": "tsx --test --test-concurrency=1 test/*.test.ts",
-    "test:unit": "tsx --test test/rules.test.ts test/crypto.test.ts test/compat.test.ts test/media-unit.test.ts"
+    "test:unit": "tsx --test test/rules.test.ts test/crypto.test.ts test/compat.test.ts test/media-unit.test.ts test/levels.test.ts test/location.test.ts"
   },
   "dependencies": {
     "express": "^5.1.0",

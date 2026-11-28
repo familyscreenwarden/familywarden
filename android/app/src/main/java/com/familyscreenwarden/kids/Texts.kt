@@ -91,7 +91,7 @@ object Texts {
     // ------------------------------------------------------------------------------------------------ who
     fun people(): TextRules.People {
         val s = Kids.snap
-        return TextRules.People(s?.phone?.contacts ?: emptyList(), s?.texting?.friends ?: emptyList(), s?.texting?.blocked ?: emptyList())
+        return TextRules.People(s?.phone?.contacts ?: emptyList(), s?.texting?.friends ?: emptyList(), s?.texting?.blocked ?: emptyList(), s?.texting?.who ?: "friends")
     }
     private fun locked() = runCatching { Kids.lockedNow }.getOrDefault(false)
     fun statusOf(thread: String, p: TextRules.People = people(), locked: Boolean = locked()) = TextRules.status(thread.split(',').filter { it.isNotEmpty() }, p, locked)
