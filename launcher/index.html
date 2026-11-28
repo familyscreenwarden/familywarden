@@ -68,7 +68,7 @@
     </section>
 
     <div class="phone-more p-only">
-      <button class="btn" data-act="power-menu">Power</button>
+      <button class="btn" data-act="sound">Sound and screen</button>
       <button class="btn" data-act="look">Colours</button>
     </div>
   </div>
@@ -135,6 +135,7 @@
     <button class="btn" data-parent="lock">Lock now</button>
     <button class="btn phone-only" data-parent="play">Play Store for a few minutes (to install an app you said yes to)</button>
     <button class="btn" data-parent="look">Change the colours</button>
+    <button class="btn phone-only" data-parent="rotate">Let the screen turn with the phone</button>
     <button class="btn" data-parent="update" id="d-parent-upd">Check for updates</button>
   </div>
   <button class="btn ghost" data-close>Back</button>
@@ -155,14 +156,46 @@
   <div class="row2"><button class="btn ghost" data-act="power-cancel">Cancel</button><button class="btn pri" id="d-power-go" data-act="power-go">Now</button></div>
 </div></div>
 
-<!-- the phone: family calls and texts (index.html?phone) -->
+<!-- the phone: the Phone menu (index.html?phone). Calls only: family, friends a grown-up said yes to, recent calls.
+     Texting has its own screen in the app (the Texts button); on an app without it, "Text family" opens this
+     dialog in its text mode, with the old list of family texts. -->
 <div class="ov" id="d-family"><div class="dlg">
-  <h2 id="d-family-h">Call family</h2>
-  <p>These always work, even when your time is up.</p>
-  <div class="fam-list" id="fam-list"></div>
-  <div class="fam-msgs hidden" id="fam-msgs"></div>
+  <h2 id="d-family-h">Phone</h2>
   <button class="btn danger" data-act="emergency">Emergency call</button>
+  <h3 class="fam-h">Family</h3>
+  <p class="fam-note">Family always works, even when your time is up.</p>
+  <div class="fam-list" id="fam-list"></div>
+  <h3 class="fam-h call-only" id="fr-h">Friends</h3>
+  <div class="fam-list call-only" id="fr-list"></div>
+  <h3 class="fam-h call-only" id="rc-h">Recent calls</h3>
+  <div class="rc-list call-only" id="rc-list"></div>
+  <div class="fam-msgs hidden" id="fam-msgs"></div>
   <button class="btn ghost" data-close>Close</button>
+</div></div>
+
+<!-- the phone: Sound and screen (the Sound button on the phone's bar) -->
+<div class="ov" id="d-sound"><div class="dlg snd">
+  <h2>Sound and screen</h2>
+  <div class="snd-modes" role="group" aria-label="Sound mode">
+    <button class="btn" data-sound="normal">Sound on</button>
+    <button class="btn" data-sound="vibrate">Vibrate</button>
+    <button class="btn" data-sound="mute">Mute</button>
+  </div>
+  <p class="snd-note">Vibrate and Mute: calls from family still ring. Alarms always ring.</p>
+  <h3 class="fam-h">Sound</h3>
+  <label class="snd-row"><span>Videos, games, music</span><input type="range" min="0" max="100" data-vol="media"></label>
+  <label class="snd-row"><span>Ringing</span><input type="range" min="0" max="100" data-vol="ring"></label>
+  <label class="snd-row"><span>Texts and alerts</span><input type="range" min="0" max="100" data-vol="notif"></label>
+  <h3 class="fam-h">Screen</h3>
+  <label class="snd-row"><span>Brightness</span><input type="range" min="2" max="100" id="snd-bright"></label>
+  <div class="snd-row"><span>Screen turns off after</span></div>
+  <div class="snd-chips" id="snd-timeout"><button class="btn" data-timeout="30">30 s</button><button class="btn" data-timeout="60">1 min</button><button class="btn" data-timeout="120">2 min</button><button class="btn" data-timeout="300">5 min</button></div>
+  <div class="snd-row"><span>Turn the screen with the phone</span><div class="snd-chips"><button role="switch" class="snd-switch" id="snd-rotate" aria-label="Turn the screen with the phone"><i></i></button></div></div>
+  <p class="snd-note hidden" id="snd-rotate-note">A grown-up turns this on once: Grown-up › Let the screen turn with the phone.</p>
+  <div class="snd-row"><span>Text size</span><div class="snd-chips"><button class="btn z1" data-zoom="100" aria-label="Normal text">A</button><button class="btn z2" data-zoom="115" aria-label="Bigger text">A</button><button class="btn z3" data-zoom="130" aria-label="Biggest text">A</button></div></div>
+  <h3 class="fam-h">Power</h3>
+  <div class="snd-modes snd-power"><button class="btn" data-power="sleep">Screen off</button><button class="btn" data-power="shutdown">Restart</button></div>
+  <button class="btn pri" data-close>Done</button>
 </div></div>
 
 <div class="ov" id="d-text"><div class="dlg">
@@ -210,6 +243,7 @@
     <h2>You can still reach family</h2>
     <div class="fam-list" id="lock-fam-list"></div>
     <div class="fam-msgs hidden" id="lock-fam-msgs"></div>
+    <button class="btn hidden" data-act="texts" id="lock-texts">Texts</button>
   </section>
   <div class="lock-acts day-only">
     <button class="btn line-acc" data-ask="time:15">Ask for 15 more minutes</button>
@@ -243,8 +277,9 @@
 <!-- ========== the phone's bar ========== -->
 <nav class="phonenav" id="nav" aria-label="Phone">
   <button class="on" data-act="home">Home</button>
-  <button data-act="phone-call">Call family</button>
-  <button data-act="phone-text">Text family <span class="dot hidden" id="nav-dot"></span></button>
+  <button data-act="phone-family">Phone</button>
+  <button data-act="texts" id="nav-texts">Texts <span class="dot hidden" id="nav-dot"></span><i class="nav-badge hidden" id="nav-badge"></i></button>
+  <button data-act="sound" id="nav-sound">Sound</button>
   <button data-act="pin">Grown-up</button>
 </nav>
 <div class="pwrmenu" id="pwrmenu">

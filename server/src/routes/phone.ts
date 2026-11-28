@@ -23,6 +23,7 @@ import { randomPairingCode } from '../crypto';
 import { withTransaction } from '../db';
 import { apkFile, looksLikeApk, mediaFile, receiveFile, removeFile } from '../files';
 import { Body, HttpError, isUuid, notFound } from '../http';
+import { sendMedia } from '../media';
 import { latestRelease } from '../releases';
 import { localTime } from '../rules';
 import type { ContactRow, DeviceRow, KidRow } from '../state';
@@ -668,13 +669,8 @@ export function phoneRoutes(ctx: Ctx): Router {
     const file = mediaFile(ctx.config.dataDir, id);
     const row = found.rows[0];
     if (!row || !fs.existsSync(file)) throw notFound('photo');
-    res.setHeader('Content-Type', row.type);
-    res.setHeader('Content-Length', String(fs.statSync(file).size));
-    res.setHeader('Cache-Control', 'private, max-age=86400');
-    // The file came from a phone: it is shown as a picture, never run as a page.
-    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
-    res.setHeader('Content-Disposition', 'inline');
-    fs.createReadStream(file).pipe(res);
+    // The file came from a phone: it is sent as data for a picture, never as a page (see sendMedia).
+    sendMedia(req, res, file, row.type, { cache: 'private, max-age=86400' });
   });
 
   /** A held text (from a number that is not on the kid's list), gone from the console and from the phone. */

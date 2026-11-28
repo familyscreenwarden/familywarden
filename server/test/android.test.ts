@@ -2,7 +2,7 @@
  * The kids' Android app against the real server and a real Postgres.
  *
  * The first suite is the phone contract: it walks one phone through setup check → pair → sync → launcher → request
- * → chore → chat → texts → APK push → update, sending what the app and its launcher page send (and what the
+ * → chore → chat → texts → photos and videos → APK push → update, sending what the app and its launcher page send (and what the
  * workflow's publish step sends) and reading what they read. The other suites cover the walls between families,
  * limits, and the paywall switch.
  */
@@ -23,6 +23,8 @@ function fakeApk(bytes = 150_000): Buffer {
   return Buffer.concat([Buffer.from('PK\x03\x04'), crypto.randomBytes(bytes)]);
 }
 const sha = (b: Buffer): string => crypto.createHash('sha256').update(b).digest('hex');
+/** The first bytes of a PNG file, then filler: what the server checks before it keeps a picture. */
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), crypto.randomBytes(600)]);
 
 let server: TestServer;
 
@@ -36,7 +38,16 @@ after(async () => {
   await server.close();
 });
 
-async function raw(method: string, url: string, body: Buffer | undefined, headers: Record<string, string>): Promise<Reply> {
+/** The app marks its two raw uploads with X-FSW-Upload: 1. Pass 'X-FSW-Upload': '' to leave the marker out. */
+function withMarker(method: string, url: string, headers: Record<string, string>): Record<string, string> {
+  const h = { ...headers };
+  if (method === 'POST' && /^\/api\/android\/(text-media\/|media$)/.test(url) && h['X-FSW-Upload'] === undefined) h['X-FSW-Upload'] = '1';
+  if (h['X-FSW-Upload'] === '') delete h['X-FSW-Upload'];
+  return h;
+}
+
+async function raw(method: string, url: string, body: Buffer | undefined, plain: Record<string, string>): Promise<Reply> {
+  const headers = withMarker(method, url, plain);
   const res = await fetch(server.url + url, { method, headers, body });
   const text = await res.text();
   let json: Json = {};
@@ -735,6 +746,82 @@ describe('the phone contract, end to end', () => {
     assert.equal((await phone.post('/api/warden/sync', { texts: [{ id: 'x', thread: ['555'], dir: 'sideways', at: now }] })).status, 400);
   });
 
+  it('photos and videos: upload, list, Range, share link, deleted on the phone, delete', async () => {
+    // What the phone's Camera and Movie Maker send: the file as the body, the rest in headers.
+    const PHOTO = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(40_000)]);
+    const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), crypto.randomBytes(300_000)]);
+    const b64 = (t: string): string => Buffer.from(t, 'utf8').toString('base64');
+    const upload = (body: Buffer, h: Record<string, string>, bearer = token): Promise<Reply> =>
+      raw('POST', '/api/android/media', body, { Authorization: `Bearer ${bearer}`, 'X-Media-At': String(Date.now() - 5000), 'X-Media-Duration': '0', ...h });
+    const ph = await upload(PHOTO, { 'Content-Type': 'image/jpeg', 'X-Media-Id': 'cam-1', 'X-Media-Kind': 'photo', 'X-Media-Title': b64('Our dog Pickles 🐶') });
+    assert.equal(ph.status, 201, ph.text);
+    assert.match(ph.body.id, UUID);
+    assert.equal((await upload(PHOTO, { 'Content-Type': 'image/jpeg', 'X-Media-Id': 'cam-1', 'X-Media-Kind': 'photo', 'X-Media-Title': '' })).status, 200);
+    const vh = { 'Content-Type': 'video/webm', 'X-Media-Id': 'mov-1', 'X-Media-Kind': 'movie', 'X-Media-Title': b64('Lego heist'), 'X-Media-At': String(Date.now()), 'X-Media-Duration': '42' };
+    const vid = await upload(WEBM, vh);
+    assert.equal(vid.status, 201, vid.text);
+    const again = await upload(WEBM, vh);
+    assert.deepEqual([again.status, again.body.id], [200, vid.body.id]);
+    // Not a photo or video, or not what it says it is: the phone gives up on that one file (415).
+    assert.equal((await upload(Buffer.from('hello'), { 'Content-Type': 'text/plain', 'X-Media-Id': 'x', 'X-Media-Kind': 'photo' })).status, 415);
+    assert.equal((await upload(Buffer.from('not really a video at all'), { 'Content-Type': 'video/mp4', 'X-Media-Id': 'x2', 'X-Media-Kind': 'video' })).status, 415);
+    assert.equal((await upload(PHOTO, { 'Content-Type': 'image/jpeg', 'X-Media-Id': 'x3', 'X-Media-Kind': 'photo' }, '')).status, 401);
+
+    let md = (await parent.get(`/api/kids/${kid}/media`)).body;
+    assert.equal(md.keepDays, 90);
+    assert.deepEqual(md.items.map((i: Json) => i.kind), ['movie', 'photo']);
+    const [mv, pi] = md.items;
+    assert.deepEqual([mv.title, mv.durationSec, mv.size, mv.type], ['Lego heist', 42, WEBM.length, 'video/webm']);
+    assert.equal(pi.title, 'Our dog Pickles 🐶');
+    assert.deepEqual([mv.deletedOnPhone, mv.linkShared], [false, false]);
+    assert.equal('familyScreen' in mv, false);
+    const full = await download(mv.url, { cookie: parent.cookie });
+    assert.equal(full.status, 200);
+    assert.equal(full.headers.get('content-type'), 'video/webm');
+    assert.equal(full.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(full.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+    assert.ok(full.bytes.equals(WEBM));
+    const part = await download(mv.url, { cookie: parent.cookie, Range: 'bytes=0-99' });
+    assert.equal(part.status, 206);
+    assert.equal(part.headers.get('content-range'), `bytes 0-99/${WEBM.length}`);
+    assert.ok(part.bytes.equals(WEBM.subarray(0, 100)));
+    assert.equal((await download(mv.url)).status, 401);
+
+    // A link for the family: the same link again, a watch page and the file, no sign-in.
+    const link = (await phone.post('/api/android/media/mov-1/link', {})).body.link as string;
+    assert.match(link, /^http:\/\/console\.test\/m\/[A-Za-z0-9_-]{20,}$/);
+    assert.equal((await phone.post('/api/android/media/mov-1/link', {})).body.link, link);
+    assert.equal((await phone.post('/api/android/media/nope/link', {})).status, 404);
+    const tok = link.split('/m/')[1];
+    const wp = await fetch(`${server.url}/m/${tok}`);
+    assert.equal(wp.status, 200);
+    const html = await wp.text();
+    assert.ok(html.includes('Mia') && html.includes('Lego heist') && html.includes('<video controls playsinline'));
+    const wf = await download(`/m/${tok}/file`, { Range: 'bytes=100-' });
+    assert.equal(wf.status, 206);
+    assert.equal(wf.bytes.length, WEBM.length - 100);
+    assert.equal((await download(`/m/${tok}/file`)).status, 200);
+    assert.equal((await fetch(`${server.url}/m/not-a-real-link`)).status, 404);
+
+    // Deleted on the phone: the copy here stays.
+    assert.deepEqual((await phone.post('/api/android/media/cam-1/deleted', {})).body, { ok: true });
+    assert.equal((await phone.post('/api/android/media/nope/deleted', {})).status, 404);
+    // "Show it on the family screen" is part of the app's API, but there is no such screen here: a plain answer, nothing stored.
+    const fs1 = await phone.post('/api/android/media/mov-1/family-screen', {});
+    assert.deepEqual([fs1.status, fs1.body.status, typeof fs1.body.message], [200, 'unavailable', 'string']);
+    md = (await parent.get(`/api/kids/${kid}/media`)).body;
+    assert.equal(md.items.find((i: Json) => i.id === mv.id).linkShared, true);
+    assert.equal(md.items.find((i: Json) => i.id === pi.id).deletedOnPhone, true);
+
+    // A parent deletes the movie: gone, its link too.
+    assert.equal((await parent.del(`/api/media/${mv.id}`)).status, 200);
+    md = (await parent.get(`/api/kids/${kid}/media`)).body;
+    assert.deepEqual(md.items.map((i: Json) => i.id), [pi.id]);
+    assert.equal((await download(mv.url, { cookie: parent.cookie })).status, 404);
+    assert.equal((await fetch(`${server.url}/m/${tok}`)).status, 404);
+    assert.equal((await fetch(`${server.url}/m/${tok}/file`)).status, 404);
+  });
+
   it('an APK: upload, push, the phone downloads and installs it, and it is allowed', async () => {
     const APK = fakeApk(60_000);
     const headers = { cookie: parent.cookie, 'Content-Type': 'application/vnd.android.package-archive', 'X-FSW-Upload': '1', 'X-Filename': 'chess.apk' };
@@ -936,6 +1023,12 @@ describe('the phone contract, end to end', () => {
     assert.equal((await parent.del(`/api/kids/${kid}`)).status, 200);
     assert.equal(fs.readdirSync(dir).length, 0);
   });
+
+  it('removing the kid removed the photos and videos too', async () => {
+    const me = (await parent.get('/api/me')).body.account.id as string;
+    assert.equal(fs.existsSync(path.join(TEST_DATA_DIR, 'kid-media', me, kid)), false);
+    assert.equal((await server.pool.query('SELECT 1 FROM kid_media WHERE kid_id = $1', [kid])).rowCount, 0);
+  });
 });
 
 describe('walls between families (phone routes)', () => {
@@ -949,7 +1042,7 @@ describe('walls between families (phone routes)', () => {
     await a.phone.post('/api/warden/launcher/act', { action: 'chat', text: 'secret family words' });
     const chat = (await a.parent.get('/api/chat')).body.messages[0];
     await a.phone.post('/api/warden/sync', { texts: [{ id: 't1', thread: ['5550001111'], dir: 'in', from: '5550001111', body: 'private text', at: Date.now(), status: 'held', media: [{ id: 'p1', type: 'image/png' }] }] });
-    const photo = await raw('POST', '/api/android/text-media/t1/p1', Buffer.from('png-bytes'), { Authorization: `Bearer ${a.phone.bearer}`, 'Content-Type': 'image/png' });
+    const photo = await raw('POST', '/api/android/text-media/t1/p1', PNG, { Authorization: `Bearer ${a.phone.bearer}`, 'Content-Type': 'image/png' });
     const held = (await a.parent.get(`/api/kids/${a.kid}/texts`)).body.held[0];
     const APK = fakeApk(5000);
     const up = await raw('POST', '/api/apks/upload?name=Private', APK, { cookie: a.parent.cookie, 'X-FSW-Upload': '1' });
@@ -1102,7 +1195,7 @@ describe('limits on what a phone can do', () => {
   it('housekeeping removes old texts with their photos', async () => {
     const f = await family('old@example.com', 'Olly', 'machine-o-000001');
     await f.phone.post('/api/warden/sync', { texts: [{ id: 'o1', thread: ['5550002222'], dir: 'out', body: 'old', at: Date.now(), media: [{ id: 'op1', type: 'image/png' }] }] });
-    const up = await raw('POST', '/api/android/text-media/o1/op1', Buffer.from('old-png'), { Authorization: `Bearer ${f.phone.bearer}`, 'Content-Type': 'image/png' });
+    const up = await raw('POST', '/api/android/text-media/o1/op1', PNG, { Authorization: `Bearer ${f.phone.bearer}`, 'Content-Type': 'image/png' });
     const file = path.join(TEST_DATA_DIR, 'text-media', up.body.id);
     assert.equal(fs.existsSync(file), true);
     await server.pool.query("UPDATE texts SET at = now() - interval '91 days' WHERE phone_id = 'o1'");

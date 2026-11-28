@@ -3,7 +3,7 @@
 // URL switches: ?empty=1 (brand-new account), ?locked=1 (trial over), ?signedout=1 (401).
 import type { FetchLike } from './client';
 import type {
-  Account, AppLimit, Contact, DashKid, Dashboard, Device, Kid, KidApp, KidRequest, LockReason, Report,
+  Account, AppLimit, Contact, DashKid, Dashboard, Device, Kid, KidApp, KidMediaItem, KidRequest, KidTexts, LockReason, PhoneText, Report,
 } from './types';
 
 interface MKid extends Kid { used: number; grants: number; status: string }
@@ -161,6 +161,29 @@ export function createMockFetch(search: string): FetchLike {
     };
   }
 
+  const picture = (from: string, to: string): string =>
+    `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 30"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="40" height="30" fill="url(#g)"/><circle cx="28" cy="9" r="5" fill="#fff" opacity=".4"/></svg>`)}`;
+  const shot = (title: string, minutesAgo: number, from: string, to: string, extra: Partial<KidMediaItem> = {}): KidMediaItem => ({
+    id: newId(), kind: 'photo', title, at: ago(minutesAgo), durationSec: 0, size: 640 * 1024, type: 'image/png', url: picture(from, to),
+    deviceName: "Ava's phone", deletedOnPhone: false, linkShared: false, linkExpiresAt: null, ...extra,
+  });
+  let media: KidMediaItem[] = [
+    shot('Our dog Pickles', 180, '#34d399', '#4f61b8', { linkShared: true, linkExpiresAt: new Date(Date.now() + 29 * 864e5).toISOString() }),
+    shot('', 60 * 27, '#6f82de', '#fb7185'),
+    shot('Sunset at the lake', 60 * 48, '#fbbf24', '#1f6f56'),
+    shot('', 60 * 76, '#2dd4bf', '#141b3f', { deletedOnPhone: true }),
+  ];
+  const chat: PhoneText[] = [
+    { id: newId(), dir: 'in', from: '555-0101', fromName: 'Mom', body: 'Pick you up at 3 today', at: ago(300), status: 'shown', media: [] },
+    { id: newId(), dir: 'out', from: null, fromName: null, body: 'Ok! Look what I drew', at: ago(290), status: 'shown', media: [{ id: newId(), type: 'image/png', url: picture('#fbbf24', '#f87171') }] },
+    { id: newId(), dir: 'in', from: '555-0101', fromName: 'Mom', body: 'I love it!', at: ago(120), status: 'shown', media: [] },
+  ];
+  const texts: Omit<KidTexts, 'keepDays'> = {
+    held: [{ id: newId(), dir: 'in', from: '(555) 019-7733', fromName: null, body: 'hey is this ava? its jake from the bus', at: ago(35), status: 'held', media: [] }],
+    threads: [{ thread: '5550101', names: ['Mom'], at: ago(120), count: 3, last: { dir: 'in', fromName: 'Mom', body: 'I love it!' } }],
+    blocked: [],
+  };
+
   function route(method: string, path: string, query: URLSearchParams, b: Body): unknown {
     const seg = path.split('/').filter(Boolean).slice(1); // drop "api"
     const key = `${method} /${seg.join('/')}`;
@@ -253,6 +276,44 @@ export function createMockFetch(search: string): FetchLike {
         return { contact: c };
       }
     }
+    // Texts and photos of a kid with a phone (small fixtures; pictures are drawn in place, videos are left out).
+    if (seg[0] === 'kids' && seg[1] && seg[2] === 'texts' && method === 'GET') {
+      kidOr404(seg[1]);
+      const mine = seg[1] === AVA ? texts : { held: [], threads: [], blocked: [] };
+      if (seg[3] === 'thread') {
+        const thread = query.get('t') ?? '';
+        return { thread, names: mine.threads.find((x) => x.thread === thread)?.names ?? [], texts: thread === '5550101' ? chat : [] };
+      }
+      return { keepDays: 90, ...mine };
+    }
+    if (seg[0] === 'texts' && seg[1] && seg[2] === 'delete' && method === 'POST') {
+      texts.held = texts.held.filter((h) => h.id !== seg[1]);
+      return { ok: true };
+    }
+    if (seg[0] === 'kids' && seg[1] && seg[2] === 'blocked-numbers') {
+      kidOr404(seg[1]);
+      if (method === 'POST') {
+        const phone = str(b, 'phone')?.trim() ?? '';
+        const num = phone.replace(/\D/g, '').slice(-10);
+        if (num.length < 3) throw new HttpError(400, 'The phone number may only have digits, spaces, and + ( ) - .');
+        if (!texts.blocked.some((x) => x.num === num)) texts.blocked.unshift({ num, phone, at: new Date().toISOString() });
+        texts.held = texts.held.filter((h) => (h.from ?? '').replace(/\D/g, '').slice(-10) !== num);
+        return { ok: true, num };
+      }
+      if (method === 'DELETE') { texts.blocked = texts.blocked.filter((x) => x.num !== seg[3]); return { ok: true }; }
+    }
+    if (seg[0] === 'kids' && seg[1] && seg[2] === 'media' && method === 'GET') {
+      kidOr404(seg[1]);
+      const items = seg[1] === AVA ? media : [];
+      return { keepDays: 90, linkDays: 30, usedBytes: items.reduce((n, m) => n + m.size, 0), quotaBytes: 5 * 1024 ** 3, items };
+    }
+    if (seg[0] === 'media' && seg[1] && method === 'DELETE') {
+      const item = media.find((m) => m.id === seg[1]);
+      if (!item) throw new HttpError(404, 'That photo or video was not found.');
+      if (seg[2] === 'link') { item.linkShared = false; item.linkExpiresAt = null; } else media = media.filter((m) => m !== item);
+      return { ok: true };
+    }
+
     if (seg[0] === 'apps' && seg[1]) {
       const a = s.apps.find((x) => x.id === seg[1]);
       if (!a) throw new HttpError(404, 'That app could not be found.');

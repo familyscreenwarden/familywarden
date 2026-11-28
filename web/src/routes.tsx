@@ -4,6 +4,8 @@ import { SignIn } from './pages/SignIn';
 import { DashboardPage } from './pages/Dashboard';
 import { KidsIndex, KidPage, NewKidPage } from './pages/Kids';
 import { KidPhonePage } from './pages/KidPhone';
+import { KidPhotosPage } from './pages/KidPhotos';
+import { KidTextsPage } from './pages/KidTexts';
 import { DevicesPage } from './pages/Devices';
 import { RequestsPage } from './pages/Requests';
 import { ChatPage } from './pages/Chat';
@@ -23,6 +25,8 @@ export function AppRoutes() {
         <Route path="/kids/new" element={<NewKidPage />} />
         <Route path="/kids/:id" element={<KidPage />} />
         <Route path="/kids/:id/phone" element={<KidPhonePage />} />
+        <Route path="/kids/:id/texts" element={<KidTextsPage />} />
+        <Route path="/kids/:id/photos" element={<KidPhotosPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/chat" element={<ChatPage />} />

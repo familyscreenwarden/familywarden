@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files shared with Android for texts: picture texts going out and coming in (mms), and the camera's photo. -->
+<paths>
+    <cache-path name="mms" path="mms/" />
+    <cache-path name="camera" path="camera/" />
+</paths>

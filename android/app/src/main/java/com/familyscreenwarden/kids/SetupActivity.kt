@@ -154,6 +154,16 @@ class SetupActivity : ComponentActivity() {
                 if (Build.VERSION.SDK_INT >= 29) runCatching { startActivityForResult(getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_DIALER), 7) }
             }
         } else text("✓ Family Screen Warden is the phone app.", GREEN)
+        val texting = android.provider.Telephony.Sms.getDefaultSmsPackage(this) == packageName
+        if (!texting) {
+            text("Make Family Screen Warden the texting app, so $name texts family and friends you said yes to (and you can read the texts in the parent console). Pick Family Screen Warden when Android asks.")
+            button("Make it the texting app") {
+                runCatching {
+                    if (Build.VERSION.SDK_INT >= 29) startActivityForResult(getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_SMS), 8)
+                    else startActivity(Intent(android.provider.Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT).putExtra(android.provider.Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName))
+                }
+            }
+        } else text("✓ Family Screen Warden is the texting app.", GREEN)
         if (!Kids.policy.isOwner) {
             text("3. Make Family Screen Warden the home screen, so it opens first: pick Screen Warden, then “Always” or “Set as default”.")
             button("Choose the home screen") { runCatching { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) } }

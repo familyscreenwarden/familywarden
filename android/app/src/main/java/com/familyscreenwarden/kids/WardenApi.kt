@@ -16,9 +16,10 @@ class WardenApiException(message: String, val status: Int?, val reached: Boolean
 
 /**
  * ALL of the app's traffic with the Family Screen Warden server goes through this one class: the JSON calls
- * (/api/warden/... and /api/android/...) and the file downloads (pushed APKs and this
- * app's own updates). Nothing else in the app opens a connection to the server, so another backend can be added
- * later by swapping or extending this class; callers only use [post] and [download].
+ * (/api/warden/... and /api/android/...), the file uploads (photos in texts, and the kid's camera photos and videos)
+ * and the file downloads (pushed APKs and this app's own updates). Nothing else in the app opens a connection to the
+ * server, so another backend can be added later by swapping or extending this class; callers only use [post],
+ * [upload], [sendFile] and [download]. android/SERVER-CONTRACT-CHANGES.md lists what the server must answer.
  * /api/warden/... is shared with the Windows app; /api/android/... is only for phones.
  */
 class WardenApi(serverUrl: String, private val token: String? = null) {
@@ -32,6 +33,47 @@ class WardenApi(serverUrl: String, private val token: String? = null) {
             c.setRequestProperty("Content-Type", "application/json")
             c.outputStream.use { it.write(body.toString().toByteArray()) }
             read(c)
+        } catch (e: IOException) {
+            throw WardenApiException("Can't reach Family Screen Warden.", null, false)
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /** Sends a file as the request body (a photo in a text). */
+    suspend fun upload(path: String, file: File, type: String): String = withContext(Dispatchers.IO) {
+        val c = open("$base/api/$path")
+        try {
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setFixedLengthStreamingMode(file.length())
+            c.setRequestProperty("Content-Type", type)
+            c.setRequestProperty("X-FSW-Upload", "1")
+            c.outputStream.use { o -> file.inputStream().use { it.copyTo(o) } }
+            read(c)
+        } catch (e: IOException) {
+            throw WardenApiException("Can't reach Family Screen Warden.", null, false)
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /**
+     * Sends a file as the request body with these headers (a photo, video or movie from the camera: the headers say
+     * what it is). Returns the HTTP status, whatever it is: the caller decides what 409 or 413 mean.
+     */
+    suspend fun sendFile(path: String, file: File, headers: Map<String, String>): Int = withContext(Dispatchers.IO) {
+        val c = open("$base/api/$path")
+        try {
+            c.readTimeout = 120_000
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setFixedLengthStreamingMode(file.length())
+            for ((k, v) in headers) c.setRequestProperty(k, v)
+            c.outputStream.use { o -> file.inputStream().use { it.copyTo(o, 64 * 1024) } }
+            val code = c.responseCode
+            runCatching { (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } }
+            code
         } catch (e: IOException) {
             throw WardenApiException("Can't reach Family Screen Warden.", null, false)
         } finally {

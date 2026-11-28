@@ -39,6 +39,13 @@ const ago = (iso) => {
 const timeOf = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
 const CATS = { all: 'All', games: 'Games', school: 'School', web: 'Websites', other: 'More' };
 const catOf = (c) => (c === 'game' || c === 'launcher' ? 'games' : c === 'school' ? 'school' : 'other');
+// Line drawings for the app's own tiles (Texts, Camera, Movie Maker).
+const glyph = (d) => `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const GLYPH = {
+  texts: glyph('<path d="M4 5h16v11H9l-5 4z"/>'),
+  camera: glyph('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
+  movies: glyph('<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>'),
+};
 const TINTS = 6; // tiles take the six brand tints in turn (by their place in the whole list, so a search keeps them)
 let toastT = 0;
 function toast(t) {
@@ -80,7 +87,14 @@ function items() {
     const t = siteIcons[s.host] || {};
     out.push({ key: 'site:' + s.host, host: s.host, name: s.tile || s.host, cat: 'web', web: true, icon: t.icon, status: 'Website', locked: false, low: false });
   }
-  out.sort((a, b) => a.name.localeCompare(b.name));
+  // A phone: the app's own Texts, Camera and Movie Maker are tiles too, first in the list. They never use time.
+  if (PHONE && S.phone?.texts) {
+    const n = S.phone.textsUnread || 0;
+    out.push({ key: 'sw-texts', name: 'Texts', cat: 'other', web: false, status: n ? `${n} new` : 'Free', locked: false, low: n > 0, own: 1, cmd: 'texts', glyph: GLYPH.texts });
+    out.push({ key: 'sw-camera', name: 'Camera', cat: 'other', web: false, status: 'Free', locked: false, low: false, own: 2, cmd: 'camera', glyph: GLYPH.camera });
+    out.push({ key: 'sw-movies', name: 'Movie Maker', cat: 'other', web: false, status: 'Free', locked: false, low: false, own: 3, cmd: 'movies', glyph: GLYPH.movies });
+  }
+  out.sort((a, b) => ((a.own || 9) - (b.own || 9)) || a.name.localeCompare(b.name));
   out.forEach((it, i) => (it.tint = i % TINTS));
   return out;
 }
@@ -99,7 +113,7 @@ function renderTiles() {
   if (!cats.includes(cat)) cat = 'all';
   const list = all.filter((i) => match(i, q, cat));
   const tile = (it) => `<button class="tile ${it.locked ? 'locked' : `tint${it.tint}`}" data-open="${esc(it.key)}">
-    <span class="ti ${it.icon ? 'img' : ''}">${it.icon ? `<img src="${esc(it.icon)}" alt="">` : esc(initials(it.name))}</span>
+    <span class="ti ${it.icon ? 'img' : ''}">${it.icon ? `<img src="${esc(it.icon)}" alt="">` : it.glyph || esc(initials(it.name))}</span>
     <span class="tt"><span class="tn">${esc(it.name)}</span><span class="ts ${it.low ? 'low' : ''}">${esc(it.status)}</span></span></button>`;
   const askTile = q ? '' : `<button class="tile asktile" data-act="ask-app"><span class="ti">+</span><span class="tt"><span class="tn">Ask for an app</span><span class="ts">${PHONE ? 'Parent decides' : 'A grown-up decides'}</span></span></button>`;
   setHtml($('grid'), list.map(tile).join('') + (list.length || !q ? askTile : ''));
@@ -319,11 +333,12 @@ function showDialog(name) {
   else if (name === 'volume') { const v = S.sys?.volume || {}; $('d-volume-in').value = v.level ?? 50; $('d-mute').textContent = v.muted ? 'Unmute' : 'Mute'; $('d-volume-p').textContent = v.device || ''; open('d-volume'); }
   else if (name === 'wifi') { const w = S.sys?.wifi || {}; $('d-wifi-p').textContent = w.connected === false ? 'Not connected to the internet. Ask a grown-up.' : w.ssid ? `Connected to ${w.ssid}${w.signal ? ` (${w.signal}% signal)` : ''}.` : 'Connected.'; open('d-wifi'); }
 }
+// The Phone menu is calls only ('call'). 'text' is the old "Text family" list, for an app without its own Texts screen.
 let famMode = 'call';
 function openFamily(mode) {
   famMode = mode;
   $('d-family').dataset.mode = mode;
-  $('d-family-h').textContent = mode === 'text' ? 'Text family' : 'Call family';
+  $('d-family-h').textContent = mode === 'text' ? 'Text family' : 'Phone';
   if (mode === 'text') seenMsgs = lastMsgId();
   render();
   open('d-family');
@@ -336,9 +351,14 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('#pwrmenu') && !e.target.closest('[data-act="power-menu"]')) $('pwrmenu').classList.remove('show');
   const d = t.dataset || {};
   if (d.close !== undefined) { closeAll(); parentPin = null; return; }
+  if (d.callnum) { send({ cmd: 'call', num: d.callnum }); toast('Calling…'); return; }
+  if (d.sound) { send({ cmd: 'sound-mode', mode: d.sound }); return; }
+  if (d.timeout) { send({ cmd: 'screen-timeout', sec: Number(d.timeout) }); return; }
+  if (d.zoom) { send({ cmd: 'text-size', zoom: Number(d.zoom) }); return; }
   if (d.open) {
     const it = items().find((i) => i.key === d.open);
     if (!it) return;
+    if (it.cmd) return send({ cmd: it.cmd });
     if (it.locked) { toast(`${it.name} is used up for today. Ask a grown-up for more?`); return; }
     send(it.web ? { cmd: 'site', host: it.host } : { cmd: 'launch', key: it.key });
     toast(`Opening ${it.name}…`);
@@ -410,8 +430,10 @@ document.addEventListener('click', (e) => {
     case 'wifi': if (MODE === 'bar') send({ cmd: 'dialog', name: 'wifi' }); else showDialog('wifi'); break;
     case 'mute': send({ cmd: 'volume', mute: !(S.sys?.volume?.muted) }); break;
     case 'power-cancel': closeAll(); break;
-    case 'phone-call': openFamily('call'); break;
-    case 'phone-text': openFamily('text'); break;
+    case 'phone-family': openFamily('call'); break;
+    // The app's own Texts screen; an app without one gets the old "Text family" list.
+    case 'texts': if (S.phone?.texts) send({ cmd: 'texts' }); else openFamily('text'); break;
+    case 'sound': renderSound(); open('d-sound'); break;
     case 'emergency': send({ cmd: 'emergency' }); break;
     case 'call-answer': send({ cmd: 'call-answer' }); break;
     case 'call-end': send({ cmd: 'call-end' }); break;
@@ -483,8 +505,9 @@ function render() {
   if (PHONE) renderPhone();
 }
 
-// ------------------------------------------------------------------ the phone: family calls and texts
-// S.phone = { contacts: [{id, name, phone, always}], emergency: '911', messages: [{id, contactId, name, text, at, mine}], call? }
+// ------------------------------------------------------------------ the phone: calls, texts, sound and screen
+// S.phone = { contacts: [{id, name, phone, always}], emergency: '911', messages: [{id, contactId, name, text, at, mine}], call?,
+//   friends: [{id, name, phone}], recent: [{name, type: 'in'|'out'|'missed', at, sec}], sound: {...}, texts: true, textsUnread }
 let textTo = null;
 let seenMsgs = null; // the newest text the kid has seen (for the dot on "Text family")
 const lastMsgId = () => { const m = (S?.phone?.messages || []).filter((x) => !x.mine); return m.length ? m[m.length - 1].id : ''; };
@@ -493,25 +516,66 @@ function renderPhone() {
   const locked = st.state === 'locked';
   // Locked (time's up, bedtime, a grown-up): only the "always" contacts.
   const people = (p.contacts || []).filter((c) => !locked || c.always);
+  // The app's own Texts screen (S.phone.texts): calls only here. Without it, the old Text buttons and list stay.
+  const own = !!p.texts;
   const row = (c) => `<div class="fam-row"><span class="fam-av">${esc(initials(c.name))}</span><b>${esc(c.name)}</b>
-    <button class="btn pri fam-call" data-call="${esc(c.id)}" aria-label="Call ${esc(c.name)}">Call</button><button class="btn fam-text" data-text="${esc(c.id)}" aria-label="Text ${esc(c.name)}">Text</button></div>`;
+    <button class="btn pri fam-call" data-call="${esc(c.id)}" aria-label="Call ${esc(c.name)}">Call</button>${own ? '' : `<button class="btn fam-text" data-text="${esc(c.id)}" aria-label="Text ${esc(c.name)}">Text</button>`}</div>`;
   const list = people.length ? people.map(row).join('') : '<div class="none">No family contacts yet. A grown-up adds them in the parent console.</div>';
   setHtml($('fam-list'), list);
   setHtml($('lock-fam-list'), list);
+  // Friends a grown-up said yes to: not when the phone is locked.
+  const fr = p.friends || [];
+  $('fr-h').classList.toggle('hidden', !fr.length);
+  setHtml($('fr-list'), fr.map((f) => `<div class="fam-row ${locked ? 'off' : ''}"><span class="fam-av">${esc(initials(f.name))}</span><b>${esc(f.name)}</b>${locked ? '<small>Later</small>' : `<button class="btn pri fam-call" data-callnum="${esc(f.phone)}" aria-label="Call ${esc(f.name)}">Call</button>`}</div>`).join(''));
+  const rc = p.recent || [];
+  $('rc-h').classList.toggle('hidden', !rc.length);
+  const kind = { in: 'Call from', out: 'You called', missed: 'Missed call from' };
+  setHtml($('rc-list'), rc.map((r) => `<div class="rc-row ${esc(r.type)}"><b>${esc(kind[r.type] || 'Call with')} ${esc(r.name)}</b><small>${esc(ago(new Date(r.at).toISOString()))}${r.sec ? ` · ${Math.max(1, Math.round(r.sec / 60))} min` : ''}</small></div>`).join(''));
+  // The Texts button: how many new texts (the app's own screen), or the dot for the old list.
+  const n = own ? Math.min(p.textsUnread || 0, 99) : 0;
+  setText($('nav-badge'), n ? String(n) : '');
+  $('nav-badge').classList.toggle('hidden', !n);
+  $('nav-texts').setAttribute('aria-label', n ? `Texts, ${n} new` : 'Texts');
+  setText($('lock-texts'), n ? `Texts (${n} new)` : 'Texts');
+  $('lock-texts').classList.toggle('hidden', !own);
+  renderSound();
   renderCall();
   $('lock-fam').classList.toggle('hidden', !locked);
   document.querySelectorAll('[data-act="emergency"]').forEach((b) => setText(b, `Emergency call (${p.emergency || '911'})`));
   const all = p.messages || [];
   const msg = (m) => `<div class="fam-msg ${m.mine ? 'mine' : ''}"><small>${esc(m.mine ? 'You to ' + m.name : m.name)} · ${esc(ago(m.at))}</small><p>${esc(m.text)}</p></div>`;
   setHtml($('fam-msgs'), all.slice(-30).map(msg).join(''));
-  $('fam-msgs').classList.toggle('hidden', !all.length || famMode !== 'text');
+  // Texting has its own screen now: the old family-texts list only shows on an app without it.
+  $('fam-msgs').classList.toggle('hidden', own || !all.length || famMode !== 'text');
   // Texts show on the lock screen too (family can always reach the kid).
   setHtml($('lock-fam-msgs'), all.slice(-2).map(msg).join(''));
-  $('lock-fam-msgs').classList.toggle('hidden', !all.length);
+  $('lock-fam-msgs').classList.toggle('hidden', own || !all.length);
   if (seenMsgs === null) seenMsgs = lastMsgId();
   if ($('d-family').classList.contains('show') && famMode === 'text') seenMsgs = lastMsgId();
-  $('nav-dot').classList.toggle('hidden', lastMsgId() === seenMsgs);
+  $('nav-dot').classList.toggle('hidden', own || lastMsgId() === seenMsgs);
 }
+// Sound and screen (S.phone.sound = { mode, media, ring, notif, brightness, timeout, zoom, canSet, rotate, canRotate }).
+function renderSound() {
+  const snd = S?.phone?.sound;
+  const b = $('nav-sound');
+  if (!snd || !b) return;
+  setText(b, snd.mode === 'mute' ? 'Muted' : snd.mode === 'vibrate' ? 'Vibrate' : 'Sound');
+  b.classList.toggle('quiet', snd.mode !== 'normal');
+  b.setAttribute('aria-label', `Sound and screen (${snd.mode === 'mute' ? 'muted' : snd.mode === 'vibrate' ? 'vibrate' : 'sound on'})`);
+  document.querySelectorAll('[data-sound]').forEach((x) => { x.classList.toggle('on', x.dataset.sound === snd.mode); x.setAttribute('aria-pressed', x.dataset.sound === snd.mode ? 'true' : 'false'); });
+  document.querySelectorAll('[data-vol]').forEach((x) => { if (document.activeElement !== x) x.value = snd[x.dataset.vol] ?? 50; });
+  if (document.activeElement !== $('snd-bright')) $('snd-bright').value = snd.brightness ?? 60;
+  const t = [30, 60, 120, 300].reduce((best, v) => (Math.abs(v - (snd.timeout || 60)) < Math.abs(best - (snd.timeout || 60)) ? v : best), 60);
+  document.querySelectorAll('[data-timeout]').forEach((x) => x.classList.toggle('on', Number(x.dataset.timeout) === t));
+  document.querySelectorAll('[data-zoom]').forEach((x) => x.classList.toggle('on', Number(x.dataset.zoom) === (snd.zoom || 100)));
+  $('snd-rotate').classList.toggle('on', !!snd.rotate);
+  $('snd-rotate').setAttribute('aria-checked', snd.rotate ? 'true' : 'false');
+  $('snd-rotate-note').classList.toggle('hidden', !!snd.canRotate);
+}
+document.querySelectorAll('[data-vol]').forEach((x) => x.addEventListener('change', () => send({ cmd: 'volume-set', which: x.dataset.vol, level: Number(x.value) })));
+$('snd-rotate').addEventListener('click', () => send({ cmd: 'rotate', on: !(S?.phone?.sound?.rotate) }));
+$('snd-bright').addEventListener('change', () => send({ cmd: 'brightness', level: Number($('snd-bright').value) }));
+
 // A phone call (S.phone.call = { state: 'ringing'|'active', name, number, since, muted, speaker }).
 function renderCall() {
   const c = S.phone?.call;
@@ -536,6 +600,8 @@ function renderCall() {
 function openText(id) {
   const c = (S.phone?.contacts || []).find((x) => x.id === id);
   if (!c) return;
+  // The phone's texting screen (the app's own Texts), when it has one.
+  if (PHONE && S.phone?.texts) return send({ cmd: 'texts', id });
   textTo = c;
   $('d-text-h').textContent = `Text ${c.name}`;
   $('d-text-in').value = '';
@@ -545,9 +611,9 @@ function openText(id) {
 if (PHONE) {
   const d = document.querySelector('[data-parent^="desktop"]');
   if (d) { d.textContent = 'Phone settings for 15 minutes'; d.dataset.parent = 'desktop:15'; }
-  const sd = document.querySelector('[data-power="shutdown"]');
+  const sd = document.querySelector('#pwrmenu [data-power="shutdown"]');
   if (sd) sd.innerHTML = '<b>Restart</b><small>Turns the phone off and on again</small>';
-  const sl = document.querySelector('[data-power="sleep"]');
+  const sl = document.querySelector('#pwrmenu [data-power="sleep"]');
   if (sl) sl.innerHTML = '<b>Screen off</b><small>Your apps stay open</small>';
 }
 
@@ -558,6 +624,15 @@ function demoHandle(msg) {
   else if (msg.cmd === 'act' && msg.act.action === 'look') { S.launcher.settings.theme = msg.act.theme; render(); }
   else if (msg.cmd === 'act' && msg.act.action === 'chat') { S.launcher.info.chat.push({ id: String(Date.now()), who: 'You', mine: true, text: msg.act.text, at: new Date().toISOString() }); render(); }
   else if (msg.cmd === 'call' || msg.cmd === 'emergency') toast('(preview) The phone would call now.');
+  else if (msg.cmd === 'texts') toast('(preview) Texts would open now.');
+  else if (msg.cmd === 'camera' || msg.cmd === 'movies') toast(`(preview) ${msg.cmd === 'camera' ? 'The camera' : 'Movie Maker'} would open now.`);
+  else if (msg.cmd === 'sound-mode') { S.phone.sound.mode = msg.mode; render(); }
+  else if (msg.cmd === 'volume-set') { S.phone.sound[msg.which] = msg.level; render(); }
+  else if (msg.cmd === 'brightness') { S.phone.sound.brightness = msg.level; render(); }
+  else if (msg.cmd === 'screen-timeout') { S.phone.sound.timeout = msg.sec; render(); }
+  else if (msg.cmd === 'text-size') { S.phone.sound.zoom = msg.zoom; render(); }
+  else if (msg.cmd === 'rotate') { if (S.phone.sound.canRotate) S.phone.sound.rotate = msg.on; else toast('A grown-up turns this on once: Grown-up › Let the screen turn with the phone.'); render(); }
+  else if (msg.cmd === 'parent' && msg.act?.what === 'rotate') { S.phone.sound.canRotate = true; S.phone.sound.rotate = true; toast('The screen turns with the phone now.'); render(); }
   else if (msg.cmd === 'power') toast(`(preview) The ${DEV} would ${msg.what === 'sleep' ? 'sleep' : PHONE ? 'restart' : 'shut down'} now.`);
   else if (msg.cmd === 'code') onMessage({ type: 'code', ok: false, message: 'That code isn’t right.' });
 }
@@ -588,7 +663,10 @@ if (MODE === 'preview') {
     windows: [{ id: '1', title: 'Minecraft', active: true }, { id: '2', title: 'Khan Academy' }],
     sys: { wifi: { connected: true, ssid: 'Home', signal: 82 }, volume: { level: 60, muted: false } },
   };
-  if (PHONE) S.phone = { emergency: '911', contacts: [{ id: 'c1', name: 'Mom', phone: '555-0102', always: true }, { id: 'c2', name: 'Dad', phone: '555-0107', always: true }, { id: 'c3', name: 'Grandma', phone: '555-0144', always: true }, { id: 'c4', name: 'Aunt Sam', phone: '555-0190', always: false }], messages: [{ id: 'x1', name: 'Mom', text: 'Pick you up at 3!', at: iso(12) }] };
+  if (PHONE) S.phone = { emergency: '911', contacts: [{ id: 'c1', name: 'Mom', phone: '555-0102', always: true }, { id: 'c2', name: 'Dad', phone: '555-0107', always: true }, { id: 'c3', name: 'Grandma', phone: '555-0144', always: true }, { id: 'c4', name: 'Aunt Sam', phone: '555-0190', always: false }], messages: [{ id: 'x1', name: 'Mom', text: 'Pick you up at 3!', at: iso(12) }],
+    texts: !params.has('oldtexts'), textsUnread: params.has('unread') ? 2 : 0, friends: [{ id: 'f1', name: 'Jake', phone: '555-0164' }],
+    recent: [{ name: 'Mom', type: 'in', at: now - 3 * 3600e3, sec: 190 }, { name: 'Dad', type: 'missed', at: now - 6 * 3600e3, sec: 0 }, { name: 'Grandma', type: 'out', at: now - 26 * 3600e3, sec: 720 }],
+    sound: { mode: 'vibrate', media: 60, ring: 80, notif: 45, brightness: 70, timeout: 60, zoom: 100, canSet: true, rotate: true, canRotate: false } };
   if (PHONE && params.get('ringing') !== null) S.phone.call = { state: 'ringing', name: 'Mom', since: iso(0) };
   if (PHONE && params.get('oncall') !== null) S.phone.call = { state: 'active', name: 'Grandma', since: iso(2), muted: false, speaker: true };
   if (params.get('timeup') !== null) Object.assign(S.status, { state: 'locked', lockReason: 'time', generalSecondsLeft: 0 });
@@ -596,6 +674,9 @@ if (MODE === 'preview') {
   if (params.get('bedtime') !== null) Object.assign(S.status, { state: 'locked', lockReason: 'bedtime', bedtimeUntil: new Date(now + 8 * 3600_000).toISOString() });
   render();
   setInterval(render, 30000);
+  // Preview a dialog: ?phone&dialog=phone (the Phone menu) or ?phone&dialog=sound (Sound and screen).
+  if (PHONE && params.get('dialog') === 'phone') openFamily('call');
+  if (PHONE && params.get('dialog') === 'sound') { renderSound(); open('d-sound'); }
 } else {
   send({ cmd: 'hello' });
 }

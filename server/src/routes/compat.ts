@@ -2,7 +2,8 @@
  * The kid-device API: what the kids' Android app (and, later, the Windows app) speaks.
  *
  *   /api/warden    setup/check, sync, launcher, launcher/act, pin, redeem     (shared by phones and PCs)
- *   /api/android   pair, request, friend, apk/:installId, download, get, text-media/:msgId/:mediaId
+ *   /api/android   pair, request, friend, apk/:installId, download, get, text-media/:msgId/:mediaId,
+ *                  media and media/:phoneId/deleted|link|family-screen (routes/media.ts)
  *
  * Words in the JSON and what they are here: "member" = kid, "computer" = device, setup code = pairing code,
  * app "key" = the id of the app's row, "exes" = its identifier (an Android package name).
@@ -32,7 +33,16 @@ import { withTransaction } from '../db';
 import { apkFile, mediaFile, receiveFile, removeFile, sendFile } from '../files';
 import { Body, HttpError, isUuid, RateLimiter } from '../http';
 import { checkParentPin } from '../pin';
+import {
+  MAX_TEXT_MEDIA_BYTES,
+  TEXT_MEDIA_QUOTA_BYTES,
+  TEXT_MEDIA_TYPES,
+  declaredType,
+  looksLike,
+  requireUploadMarker,
+} from '../media';
 import { downloadRelease, latestRelease } from '../releases';
+import { mediaRoutes } from './media';
 import { localTime, type RuleKid } from '../rules';
 import {
   loadKidStates,
@@ -49,7 +59,6 @@ const LAYOUTS = ['bright', 'gamer', 'glass'] as const;
 const THEMES = ['galaxy', 'ocean', 'jungle', 'sunset'] as const;
 const WARN_MINUTES = [10, 5];
 const MAX_PENDING_REQUESTS = 5;
-const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 export const TEXT_KEEP_DAYS = 90;
 /** Family chat: how long one message may be, and how many a kid may send in a minute. */
 export const CHAT_MAX_LENGTH = 300;
@@ -141,6 +150,24 @@ export interface CompatRouters {
   android: Router;
   /** POST /api/android/text-media/:msgId/:mediaId, mounted before the JSON parser (the body is the photo). */
   textMediaUpload: (req: Request, res: Response) => Promise<void>;
+  /** POST /api/android/media, mounted before the JSON parser (the body is a photo or video). */
+  mediaUpload: (req: Request, res: Response) => Promise<void>;
+  /** /m/<token>: what a share link shows. No sign-in. */
+  watch: Router;
+  /** The parents' side of the kids' photos and videos. */
+  mediaParent: Router;
+}
+
+/** Who is calling with a device token: the device and its family. Every kid-device route starts here. */
+export async function deviceAuth(pool: Ctx['pool'], req: Request): Promise<Auth> {
+  const match = /^Bearer\s+([A-Za-z0-9_-]{20,200})$/.exec(req.headers.authorization ?? '');
+  if (!match?.[1]) throw new HttpError(401, 'This device is not set up yet.');
+  const found = await pool.query<DeviceRow>('SELECT * FROM devices WHERE token_hash = $1', [sha256Hex(match[1])]);
+  const device = found.rows[0];
+  const owner = device ? await pool.query<AccountRow>('SELECT * FROM accounts WHERE id = $1', [device.account_id]) : null;
+  const account = owner?.rows[0];
+  if (!device || !account) throw new HttpError(401, 'This device was removed. Set it up again from the parent console.');
+  return { device, account };
 }
 
 export function compatRoutes(ctx: Ctx): CompatRouters {
@@ -154,16 +181,9 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
 
   // ---------------------------------------------------------------- who is calling
 
-  async function auth(req: Request): Promise<Auth> {
-    const match = /^Bearer\s+([A-Za-z0-9_-]{20,200})$/.exec(req.headers.authorization ?? '');
-    if (!match?.[1]) throw new HttpError(401, 'This device is not set up yet.');
-    const found = await pool.query<DeviceRow>('SELECT * FROM devices WHERE token_hash = $1', [sha256Hex(match[1])]);
-    const device = found.rows[0];
-    const owner = device ? await pool.query<AccountRow>('SELECT * FROM accounts WHERE id = $1', [device.account_id]) : null;
-    const account = owner?.rows[0];
-    if (!device || !account) throw new HttpError(401, 'This device was removed. Set it up again from the parent console.');
-    return { device, account };
-  }
+  const auth = (req: Request): Promise<Auth> => deviceAuth(pool, req);
+  const media = mediaRoutes(ctx, auth);
+  android.use('/media', media.phone);
 
   // ---------------------------------------------------------------- setup: check the code, pair
 
@@ -649,7 +669,7 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
   /** One request from a kid. The same thing is not asked twice, a fresh "no" stands for 12 hours, and 5 can wait at a time. */
   async function ask(
     a: Auth,
-    r: { kind: 'time' | 'app' | 'site' | 'contact'; minutes: number | null; detail: string; identifier: string | null },
+    r: { kind: 'time' | 'app' | 'site' | 'contact'; minutes: number | null; detail: string; identifier: string | null; note?: string | null; phone?: string | null },
   ): Promise<Asked> {
     const { device, account } = a;
     return withTransaction(pool, async (db) => {
@@ -667,11 +687,11 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
       if (before?.status === 'pending') return { status: 'pending', id: before.id, message: 'Already asked. Waiting for a parent.' };
       if (before?.fresh_no) return { status: 'denied', message: 'A parent already said no to this today.' };
       const made = await db.query<{ id: string }>(
-        `INSERT INTO requests (account_id, kid_id, device_id, kind, minutes, detail, identifier)
-         SELECT $1, $2, $3, $4, $5, $6, $7
+        `INSERT INTO requests (account_id, kid_id, device_id, kind, minutes, detail, identifier, note, phone)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $9, $10
           WHERE (SELECT count(*) FROM requests WHERE account_id = $1 AND kid_id = $2 AND status = 'pending') < $8
          RETURNING id`,
-        [account.id, device.kid_id, device.id, r.kind, r.minutes, r.detail, r.identifier, MAX_PENDING_REQUESTS],
+        [account.id, device.kid_id, device.id, r.kind, r.minutes, r.detail, r.identifier, MAX_PENDING_REQUESTS, r.note ?? null, r.phone ?? null],
       );
       const row = made.rows[0];
       if (!row) return { status: 'pending', message: 'Lots of questions are waiting already. Ask a parent in person.' };
@@ -709,17 +729,20 @@ export function compatRoutes(ctx: Ctx): CompatRouters {
     const body = new Body(req.body);
     const name = body.string('name', 'Their name', { max: 60 });
     const phone = body.string('phone', 'Their phone number', { max: 30 });
+    // How the kid knows them ("In my class"): shown to the parent with the question.
+    const note = body.nullableString('note', 'The note', 200);
     const num = numKey(phone);
     if (!PHONE_RE.test(phone) || num.length < 3) throw new HttpError(400, 'Enter their phone number.');
-    const contacts = await pool.query<{ name: string; phone: string }>('SELECT name, phone FROM contacts WHERE account_id = $1 AND kid_id = $2', [
-      a.account.id,
-      a.device.kid_id,
-    ]);
-    if (contacts.rows.some((c) => numKey(c.phone) === num)) {
-      res.json({ status: 'approved', message: `You can already text ${name}.` });
+    const contacts = await pool.query<{ name: string; phone: string; can_call: boolean; can_text: boolean }>(
+      'SELECT name, phone, can_call, can_text FROM contacts WHERE account_id = $1 AND kid_id = $2',
+      [a.account.id, a.device.kid_id],
+    );
+    const known = contacts.rows.find((c) => numKey(c.phone) === num);
+    if (known && (known.can_call || known.can_text)) {
+      res.json({ status: 'approved', message: known.can_call ? 'That number is already in your family list.' : `You can already text ${name}.` });
       return;
     }
-    const asked = await ask(a, { kind: 'contact', minutes: null, detail: name, identifier: num });
+    const asked = await ask(a, { kind: 'contact', minutes: null, detail: name, identifier: num, note, phone });
     res.json(asked.status === 'sent' ? { ...asked, message: 'Sent to a parent. Once they say yes, you can text your friend.' } : asked);
   });
 
@@ -1013,26 +1036,39 @@ ${code ? `<p style="margin-top:18px">If the app asks, your setup code is:</p><di
 </main></body></html>`);
   });
 
-  /** A photo from a text on the phone (raw body). */
+  /**
+   * A picture, clip or sound from a text on the phone (raw body). Only what a picture text can carry is taken, the
+   * first bytes must be what the type says, and it is only ever sent back as data (see sendMedia).
+   */
   async function textMediaUpload(req: Request, res: Response): Promise<void> {
+    requireUploadMarker(req);
     const { device, account } = await auth(req);
     const msgId = clean(req.params.msgId, 64);
     const mediaId = clean(req.params.mediaId, 64);
     if (!msgId || !mediaId) throw new HttpError(400, 'The photo needs the ids of its text.');
-    const type = String(req.headers['content-type'] ?? 'application/octet-stream').split(';')[0]?.trim().slice(0, 80) ?? '';
-    if (!/^(image|video|audio)\/[a-z0-9.+-]+$/.test(type)) throw new HttpError(415, 'Only photos, videos and sound.');
+    const type = declaredType(req);
+    if (!(TEXT_MEDIA_TYPES as readonly string[]).includes(type)) throw new HttpError(415, 'Only photos, videos and sound.');
     const have = await pool.query<{ id: string }>('SELECT id FROM text_media WHERE device_id = $1 AND phone_media_id = $2', [device.id, mediaId]);
     if (have.rows[0]) {
       req.resume();
       res.json({ ok: true, id: have.rows[0].id });
       return;
     }
+    const used = await pool.query<{ bytes: string }>('SELECT COALESCE(SUM(size), 0)::text AS bytes FROM text_media WHERE account_id = $1 AND kid_id = $2', [
+      account.id,
+      device.kid_id,
+    ]);
+    if (Number(used.rows[0]?.bytes ?? 0) >= TEXT_MEDIA_QUOTA_BYTES) throw new HttpError(507, 'There is no room left for more photos from texts.');
     const id = crypto.randomUUID();
     const file = mediaFile(ctx.config.dataDir, id);
-    const got = await receiveFile(req, file, MAX_MEDIA_BYTES, 'That photo is too big (8 MB at most).');
+    const got = await receiveFile(req, file, MAX_TEXT_MEDIA_BYTES, 'That photo is too big (8 MB at most).');
     if (got.size === 0) {
       removeFile(file);
       throw new HttpError(400, 'The photo is empty.');
+    }
+    if (looksLike(type, got.head) === false) {
+      removeFile(file);
+      throw new HttpError(415, 'That file is not the photo, video or sound it says it is.');
     }
     const made = await pool.query<{ id: string }>(
       `INSERT INTO text_media (id, account_id, kid_id, device_id, phone_msg_id, phone_media_id, type, size)
@@ -1044,5 +1080,5 @@ ${code ? `<p style="margin-top:18px">If the app asks, your setup code is:</p><di
     res.status(201).json({ ok: true, id: made.rows[0]?.id ?? id });
   }
 
-  return { warden, android, textMediaUpload };
+  return { warden, android, textMediaUpload, mediaUpload: media.upload, watch: media.watch, mediaParent: media.parent };
 }

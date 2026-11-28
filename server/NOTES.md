@@ -151,16 +151,18 @@ How the app's words and rules were fitted to this server. The app's code in `and
 - **Family chat** is per family: every kid's launcher and the parent console. 300 characters; a kid may send 6 a
   minute, parents 20. Launchers get the last 40 messages of 7 days; the console shows 30 days; messages older than
   90 days are deleted. A parent can remove any message. There is no switch to turn the chat off.
-- **Texts (SMS)**: the server accepts copies of a phone's texts in `sync` (`texts`), photos through
-  `text-media`, "ask to add a friend" (`/api/android/friend`), and sends `texting` back. **The current app does not
-  send any of this**: its texts stay on the phone, so the console's "Texts on the phone" card stays empty and says so.
-  The routes are tested with requests shaped like the ones an app with texting would send.
-- Contacts: the phone's call list is the contacts with "can call"; contacts with "can text" only go out as
-  `texting.friends`. The current app texts anyone in its call list, so "can call, cannot text" is not enforced by it.
+- **Texts (SMS)**: the app is the phone's texting app now. It sends copies of texts in `sync` (`texts`), pictures
+  through `text-media`, "ask to add a friend" (`/api/android/friend`), and reads `texting` back. See "Kids' photos,
+  videos and texts" below.
+- **Who is family and who is a friend.** The app has two lists: `phone.contacts` (family: texts and calls, and with
+  `always` also while the phone is locked) and `texting.friends` (texts and calls, never while locked). Here family =
+  contacts with "Call" on; friends = contacts with only "Text" on. So the two switches no longer mean exactly "can
+  call" and "can text": a family contact can always be texted, a friend can also be called. The console says so.
 
 ### Files and publishing
 
-- Files live under `DATA_DIR`: `releases/android/<version>.apk`, `apks/<id>.apk`, `text-media/<id>`.
+- Files live under `DATA_DIR`: `releases/android/<version>.apk`, `apks/<id>.apk`, `text-media/<id>`,
+  `kid-media/<account>/<kid>/<id>`.
   Uploads are streamed to disk through a `.part` file. Limits: app version 200 MB, APK 200 MB (20 per family),
   photo 8 MB.
 - App versions are for the whole server, not per family. The newest 3 keep their file.
@@ -179,5 +181,47 @@ How the app's words and rules were fitted to this server. The app's code in `and
   there is no Windows app yet.
 - Remote "turn off" (`shutdown`) and "only watch" (`watchOnly`): always null.
 - No email or push to parents when a kid asks for something or marks a chore done: it shows in the console only.
-- Old files of deleted families are not swept (there is no "delete family" route).
-- The mock mode of the web app (`npm run dev:mock`) does not know the new routes.
+- There is still no "delete family" route. Photos, videos and pictures from texts of a family removed in the
+  database are swept by housekeeping; APK files a removed family uploaded are not.
+- The mock mode of the web app (`npm run dev:mock`) knows the Texts and Photos pages (pictures only, no videos); it
+  does not know the phone, chores, chat or APK routes.
+
+
+## Kids' photos, videos and texts (added with the app's Camera, Movie Maker and Texts)
+
+The app's code in `android/`, its `SERVER-CONTRACT-CHANGES.md` and the server the app was first written for were the
+contract. Every item of `SERVER-CONTRACT-CHANGES.md` has a test in `test/android.test.ts` or `test/media.test.ts`.
+
+### Read one way or another
+
+- **`X-FSW-Upload: 1` is required** on the two raw uploads (400 without), as the app sends it.
+- **A file that is not what its type says answers 415, not 400.** The app retries a 400 for ever and sends nothing
+  after it; on 415 it gives up on that one file and goes on.
+- **Room used up answers 507**, which the app retries later, so uploads start again once a parent deleted something.
+  Nothing is deleted automatically to make room (a kid could push older photos out by filling the room).
+- **A phone reaches only what that phone uploaded** (looked up by device and the phone's id). A phone set up again
+  after it was removed in the console is a new device: it cannot make links for its old uploads; the parents still see them.
+- **Removing a phone keeps its copies** and the links already sent; removing the kid removes everything.
+- **Links**: any item can get one (the app only asks for videos and movies). `PUBLIC_URL` is the link's address.
+  Changing `SESSION_SECRET` does not break links already sent, but the next ask makes a new link. A parent ending a
+  link is not told to the phone: the app keeps the old link and would text it again; it then shows "not working".
+- **A parent's delete is not told to the phone either.** If the kid later shares that item, the app uploads it again.
+- **Link pages keep working whatever the plan says** (like the device API).
+- **Friend requests** are ordinary requests of kind `contact`; yes makes a text-only contact (a friend). The contact's
+  number is stored as digits; the request keeps the number as typed for the parent to read.
+- **`texting.asked[].phone`** is the number's digits (the app compares digits).
+- **Held texts** are not listed among the chats until the phone reports them as shown.
+- **Limits chosen here**: 200 MB a file, 5 GB a kid (`KID_MEDIA_QUOTA_MB`), 300 uploads an hour and 60 link asks an
+  hour per phone, 240 link-page requests a minute per address; pictures in texts 8 MB each, 1 GB a kid; 90 days.
+  The app stops a recording at 300 MB, so a recording between 200 and 300 MB is never copied (413).
+- **No thumbnails**: the gallery shows the photos themselves and each video's first frame.
+- **The demo family** gets texts, photos and videos only when the seed is given a data folder (`npm run seed` does).
+
+### Left out, because this product does not have them
+
+- **The family screen** (a wall screen or kiosk showing a slideshow) and its approval: `family-screen` answers
+  `{status:'unavailable', message}`; no `familyScreen` field in the gallery, no yes / no for it.
+- **Family photos / the photo frame** (a kid's photo going into the family's shared photos).
+- **One-tap answer links** from emails or push messages for friend requests (there are no notifications; a parent
+  answers in the console), and the note to parents when a stranger's text is held.
+- **A parents' control for sound, screen or rotation**: the app keeps those on the phone and sends nothing.

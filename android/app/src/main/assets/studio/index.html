@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Camera</title>
+<link rel="stylesheet" href="studio.css">
+</head>
+<body>
+<!-- Filters shared by the camera, the photo and Movie Maker (canvas filter: url(#fx-comic)). -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="fx-comic" color-interpolation-filters="sRGB">
+    <feComponentTransfer>
+      <feFuncR type="discrete" tableValues="0 .3 .6 .85 1"/><feFuncG type="discrete" tableValues="0 .3 .6 .85 1"/><feFuncB type="discrete" tableValues="0 .3 .6 .85 1"/>
+    </feComponentTransfer>
+  </filter>
+</svg>
+
+<!-- Camera -->
+<section id="v-camera" class="view cam">
+  <div class="finder" id="finder">
+    <video id="cam-video" playsinline muted autoplay></video>
+    <canvas id="cam-demo" class="hidden"></canvas>
+    <div class="rainbow hidden" id="cam-rainbow"></div>
+    <canvas id="cam-stickers" class="stickers"></canvas>
+    <div class="frame" aria-hidden="true"></div>
+    <div class="count hidden" id="cam-count"></div>
+    <div class="rec hidden" id="cam-rec"><i></i><span id="cam-rec-t">0:00</span> / 1:00</div>
+    <div class="flashfx" id="cam-flashfx"></div>
+    <div class="camerr hidden" id="cam-err">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      <b>The camera isn't on</b><p id="cam-err-t">A grown-up needs to let Family Screen Warden use the camera.</p>
+      <button class="pill" data-act="cam-retry">Try again</button>
+    </div>
+  </div>
+  <div class="cam-top">
+    <button class="icon dark" data-act="home" aria-label="Back home"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <span class="grow"></span>
+    <button class="icon dark" id="b-flash" data-act="flash" aria-label="Flash"><svg viewBox="0 0 24 24" class="yellow"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></button>
+    <button class="icon dark" id="b-timer" data-act="timer" aria-label="Timer"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg></button>
+    <button class="icon dark" id="b-flip" data-act="flip" aria-label="Flip camera"><svg viewBox="0 0 24 24"><path d="M4 7h11a5 5 0 0 1 0 10H9"/><path d="m7 4-3 3 3 3M12 20l-3-3"/></svg></button>
+  </div>
+  <div class="tray hidden" id="cam-tray"></div>
+  <div class="chips" id="cam-fx"></div>
+  <div class="cam-bar">
+    <div class="seg" role="tablist">
+      <button id="m-photo" class="on" data-act="photo-mode">Photo</button>
+      <button id="m-video" data-act="video-mode">Video</button>
+    </div>
+    <div class="shoot">
+      <button class="last" id="cam-last" data-act="photos" aria-label="My photos"></button>
+      <button class="shutter" id="shutter" data-act="shoot" aria-label="Take a photo"><span></span></button>
+      <button class="tile" data-act="movie" aria-label="Make a movie"><svg viewBox="0 0 24 24" class="orange"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg></button>
+    </div>
+  </div>
+</section>
+
+<!-- My photos -->
+<section id="v-photos" class="view">
+  <header class="top">
+    <button class="icon" data-act="back" aria-label="Back to the camera"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <h1>My photos</h1>
+    <span class="seen">Grown-ups can see these</span>
+  </header>
+  <div class="chips flat" id="ph-tabs">
+    <button class="on" data-tab="all">All</button><button data-tab="photo">Photos</button><button data-tab="video">Videos</button><button data-tab="movie">My movies</button>
+  </div>
+  <div id="ph-grid" class="scroll"></div>
+  <div class="pickbar hidden" id="pickbar">
+    <div class="pb-top"><b id="pb-n">1 picked</b><button class="link" data-act="unpick-all">Cancel</button></div>
+    <div class="acts">
+      <button class="act pink" data-act="texts"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Send in Texts</button>
+      <button class="act orange" data-act="make"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>Make a movie</button>
+      <button class="act" data-act="delete"><svg viewBox="0 0 24 24" class="red"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Delete</button>
+    </div>
+  </div>
+</section>
+
+<!-- One photo or video, big -->
+<section id="v-viewer" class="view viewer">
+  <div class="stage" id="vw-stage"></div>
+  <header class="vw-top">
+    <button class="icon dark" data-act="back" aria-label="Back to my photos"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="who"><b id="vw-title"></b><small id="vw-sub"></small></div>
+  </header>
+  <div class="vw-bar">
+    <div class="acts">
+      <button class="act pink" data-act="texts"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Send in Texts</button>
+      <button class="act orange" data-act="make"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>Make a movie</button>
+      <button class="act" data-act="delete"><svg viewBox="0 0 24 24" class="red"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Delete</button>
+    </div>
+  </div>
+</section>
+
+<!-- Movie Maker -->
+<section id="v-movie" class="view">
+  <header class="top mv-top">
+    <button class="icon" data-act="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="who name" data-act="rename" aria-label="Change the movie's name"><b id="mv-title">My movie</b><small id="mv-sub">No clips yet</small></button>
+    <button class="done" data-act="done">Done</button>
+  </header>
+  <div class="preview" id="mv-preview">
+    <canvas id="mv-canvas"></canvas>
+    <div class="mv-empty hidden" id="mv-empty"><b>Add photos and videos</b><span>Tap “Add clips” to start your movie.</span></div>
+    <button class="play" id="mv-play" data-act="play" aria-label="Play"><svg viewBox="0 0 24 24" class="fill"><path d="M7 4l13 8-13 8z"/></svg></button>
+    <div class="tapnote hidden" id="mv-tapnote">Tap the movie to put a sticker</div>
+  </div>
+  <div class="prog"><span id="mv-at">0:00</span><div class="bar" id="mv-bar"><i id="mv-fill"></i></div><span id="mv-len">0:00</span></div>
+  <div class="label">CLIPS (TAP ONE TO CHANGE IT)</div>
+  <div class="clips" id="mv-clips"></div>
+  <button class="music" data-act="tool-music"><svg viewBox="0 0 24 24" class="orange"><path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+    <span class="grow"><b>Music:</b> <span id="mv-music">Happy Ukulele</span></span><span class="soft" id="mv-vol">Volume 60%</span></button>
+  <div class="tools">
+    <div class="hint" id="mv-hint">Pick a clip to change it.</div>
+    <div class="trim hidden" id="mv-trim">
+      <button class="icon sm" data-act="left" aria-label="Move clip earlier"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div class="dual" id="mv-dual"><div class="track"><i id="mv-sel"></i></div><input type="range" id="tr-a" min="0" max="1000" value="0" aria-label="Start of the clip"><input type="range" id="tr-b" min="0" max="1000" value="1000" aria-label="End of the clip"></div>
+      <button class="icon sm" data-act="right" aria-label="Move clip later"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>
+    <div class="grid4">
+      <button class="tool" data-act="tool-add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add clips</button>
+      <button class="tool" data-act="tool-music"><svg viewBox="0 0 24 24" class="orange"><path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Music</button>
+      <button class="tool" data-act="tool-words" data-need><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg>Words</button>
+      <button class="tool" data-act="tool-stickers" data-need><svg viewBox="0 0 24 24" class="yellow"><path d="m12 3 2.6 5.6 6 .6-4.5 4 1.3 6L12 16l-5.4 3.2 1.3-6-4.5-4 6-.6z"/></svg>Stickers</button>
+      <button class="tool" data-act="tool-speed" data-need><svg viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-6"/></svg>Speed</button>
+      <button class="tool" data-act="tool-filters" data-need><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/></svg>Filters</button>
+      <button class="tool" data-act="tool-voice" data-need><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Voice</button>
+      <button class="tool" data-act="remove" data-need><svg viewBox="0 0 24 24" class="red"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Remove</button>
+    </div>
+  </div>
+</section>
+
+<!-- Making the movie -->
+<section id="v-making" class="view center">
+  <div class="star spin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3 7 7 .6-5.3 4.7L18.4 22 12 18l-6.4 4 1.7-7.7L2 9.6 9 9z"/></svg></div>
+  <canvas id="mk-canvas" class="mk-canvas" width="960" height="540" aria-hidden="true"></canvas>
+  <h1 id="mk-t">Making your movie… 0%</h1>
+  <div class="bigbar"><i id="mk-fill"></i></div>
+  <p class="soft">Keep Movie Maker open. It takes as long as your movie.</p>
+  <button class="ghost wide" data-act="stop-making">Stop</button>
+</section>
+
+<!-- The movie is ready -->
+<section id="v-done" class="view done-v">
+  <div class="row-l"><button class="icon" data-act="back" aria-label="Back to editing"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button></div>
+  <div class="star"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3 7 7 .6-5.3 4.7L18.4 22 12 18l-6.4 4 1.7-7.7L2 9.6 9 9z"/></svg></div>
+  <h1>Your movie is ready!</h1>
+  <p class="soft" id="dn-sub">My movie · 0:00 · saved in My movies</p>
+  <div class="poster" id="dn-poster">
+    <button class="play big" data-act="watch" aria-label="Watch"><svg viewBox="0 0 24 24" class="fill"><path d="M7 4l13 8-13 8z"/></svg></button>
+    <span class="dur" id="dn-dur">0:00</span>
+  </div>
+  <div class="dn-btns">
+    <button class="big-btn pink" data-act="done-texts"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Send to family in Texts</button>
+    <button class="big-btn teal" data-act="done-screen"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Show on the family screen</button>
+    <button class="big-btn plain" data-act="back">Keep editing</button>
+  </div>
+  <p class="foot">Long movies are sent as a link your family opens (picture texts can only carry about 30 seconds).</p>
+</section>
+
+<!-- Closed (bedtime, time's up) -->
+<section id="v-closed" class="view center">
+  <div class="moon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></div>
+  <h1 id="cl-t">Camera is closed at bedtime</h1>
+  <p class="soft" id="cl-p">Your photos and movies are safe. See you in the morning!</p>
+  <button class="primary wide" data-act="home">Home</button>
+</section>
+
+<!-- Sheets -->
+<div id="sh-confirm" class="sheet"><div class="panel">
+  <i class="grab"></i>
+  <h2 id="cf-t">Delete this?</h2>
+  <p>It goes from this phone. Your grown-ups can still see it in the parent console.</p>
+  <div class="btns"><button class="ghost" data-close>Keep it</button><button class="danger" data-act="delete-yes">Delete</button></div>
+</div></div>
+
+<div id="sh-tool" class="sheet"><div class="panel" id="tool-panel"></div></div>
+
+<div id="toast" class="toast"></div>
+<script src="studio.js"></script>
+</body>
+</html>

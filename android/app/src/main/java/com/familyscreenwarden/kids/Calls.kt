@@ -139,6 +139,8 @@ object Calls {
             runCatching { ctx.getSystemService(AudioManager::class.java).isMicrophoneMute = false }
         }
         screenNearEar(s == State.ACTIVE)
+        // Vibrate or Mute: a family member's call still rings (Sound plays it on the alarm sound).
+        if (s == State.RINGING && Sound.quiet && Kids.isFamily(number)) Sound.familyRing(true) else if (s != State.RINGING) Sound.familyRing(false)
         notifyCall()
         Kids.callChanged(s, before)
     }

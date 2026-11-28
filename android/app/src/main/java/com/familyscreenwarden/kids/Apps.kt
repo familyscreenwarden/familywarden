@@ -28,13 +28,18 @@ class Apps(context: Context) {
     fun installed(force: Boolean = false): List<InstalledApp> {
         if (!force && System.currentTimeMillis() - scanned < 5 * 60_000 && cache.isNotEmpty()) return cache
         val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        cache = pm.queryIntentActivities(i, PackageManager.MATCH_ALL)
+        // Right after a restart, before the phone is unlocked, Android lists only a few apps unless asked for all of them
+        // (that list was kept for 5 minutes: allowed apps went missing after a restart).
+        val flags = PackageManager.MATCH_ALL or PackageManager.MATCH_DIRECT_BOOT_AWARE or PackageManager.MATCH_DIRECT_BOOT_UNAWARE
+        cache = pm.queryIntentActivities(i, flags)
             .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
             .filter { it.first != ctx.packageName }
             .distinctBy { it.first }
             .map { InstalledApp(it.first, it.second) }
             .sortedBy { it.label.lowercase() }
-        scanned = System.currentTimeMillis()
+        // Still locked: look again soon rather than keeping a list that may be short.
+        val unlocked = ctx.getSystemService(android.os.UserManager::class.java).isUserUnlocked
+        scanned = if (unlocked) System.currentTimeMillis() else System.currentTimeMillis() - 4 * 60_000
         return cache
     }
 

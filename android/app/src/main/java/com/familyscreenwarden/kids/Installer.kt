@@ -1,5 +1,9 @@
 package com.familyscreenwarden.kids
 
+import androidx.core.app.NotificationCompat
+import android.provider.Settings
+import android.net.Uri
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -42,20 +46,57 @@ class Installer(context: Context) {
 
     fun offerUpdate(u: UpdateInfo?) { update = u }
 
-    /** Every 15 seconds: install the next APK, or the app's update when the screen is off. */
+    private val asked = mutableSetOf<String>()
+
+    /**
+     * Every 15 seconds: install the next APK, or the app's update. The device owner updates by itself while the screen
+     * is off. A phone that isn't (quick install) has to ask the person, so it asks once per version, while the screen is
+     * on (Android shows "Update this app?"), and leaves a notification to tap.
+     */
     fun upkeep() {
         next()
         val u = update ?: return
         if (!newer(u.version, Kids.version) || updateBusy || busy) return
-        if (ctx.getSystemService(PowerManager::class.java).isInteractive) return
-        selfUpdate(u)
+        val on = ctx.getSystemService(PowerManager::class.java).isInteractive
+        if (Kids.policy.isOwner) { if (!on) selfUpdate(u) }
+        else if (on && asked.add(u.version)) startUpdate(u)
     }
 
     fun updateNow(): String {
         val u = update
         if (u == null || !newer(u.version, Kids.version)) return "You have the newest version (${Kids.version})."
+        // A try that's waiting on the person doesn't block a new one.
+        if (updateBusy) { updateBusy = false; busy = false }
+        return startUpdate(u)
+    }
+
+    private fun startUpdate(u: UpdateInfo): String {
+        if (!Kids.policy.isOwner && !ctx.packageManager.canRequestPackageInstalls()) {
+            val i = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ask(i, "Allow Family Screen Warden to update itself", "Tap, switch on “Allow from this source”, then tap Check for updates again.", 91)
+            runCatching { ctx.startActivity(i) }
+            return "Switch on “Allow from this source” for Family Screen Warden, then tap Check for updates again."
+        }
         selfUpdate(u)
         return "Installing ${u.version} now."
+    }
+
+    /** Android needs the person to say yes (not the device owner): try now, and leave a notification to tap. */
+    fun needsPerson(confirm: Intent, id: String?, label: String?) {
+        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (id == null) { updateBusy = false; ask(confirm, "Update Family Screen Warden", "Tap to install the new version.", 92) }
+        else { done += id; ask(confirm, "Install ${label ?: "an app"}", "A grown-up sent it from the parent console. Tap to install.", 93) }
+        runCatching { ctx.startActivity(confirm) }
+        busy = false
+        Kids.reapply()
+        next()
+    }
+
+    private fun ask(i: Intent, title: String, text: String, nid: Int) {
+        val pi = PendingIntent.getActivity(ctx, nid, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(ctx, "kids").setSmallIcon(R.drawable.ic_notify).setContentTitle(title).setContentText(text)
+            .setContentIntent(pi).setAutoCancel(true).setPriority(NotificationCompat.PRIORITY_HIGH).build()
+        runCatching { ctx.getSystemService(NotificationManager::class.java).notify(nid, n) }
     }
 
     private fun next() {
@@ -141,8 +182,10 @@ class InstallReceiver : BroadcastReceiver() {
         Kids.init(context)
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            // Not the device owner (a test phone): Android asks the person.
-            @Suppress("DEPRECATION") (intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT))?.let { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            // Not the device owner (a quick-install phone): Android asks the person. On newer Android an app in the
+            // background can't open that screen by itself, so there's a notification to tap too.
+            @Suppress("DEPRECATION") val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+            Kids.installer.needsPerson(confirm, intent.getStringExtra("id"), intent.getStringExtra("label"))
             return
         }
         Kids.installer.result(intent.getStringExtra("id"), intent.getStringExtra("pkg"), intent.getStringExtra("label"), intent.getStringExtra("file"), status,

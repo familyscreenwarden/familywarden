@@ -5,8 +5,8 @@ applies them on the kid's Android phone: the kid's time, apps, websites, bedtime
 
 - **The launcher is the phone's home screen.** It is the page in [`../launcher`](../launcher) (copied into the app at
   build time, and shared with the Windows app later), opened as `index.html?phone`. One dark look with four accent
-  colours, a bar along the bottom (Home, Call family, Text family, Grown-up), the "Earn more time" chore list and the
-  family chat.
+  colours, a bar along the bottom (Home, Phone, Texts, Sound, Grown-up), the "Earn more time" chore list and the
+  family chat. The screen turns with the phone, in the launcher and in every app.
 - **Device owner.** The phone is set up from Android's welcome screen with a QR code from the parent console, so the
   app is the phone's device owner. Only allowed apps can open, using Android's lock-task mode; removing an app from
   the list closes it right away. The kid can't remove the app, factory reset, use safe mode or USB debugging, or
@@ -21,7 +21,17 @@ applies them on the kid's Android phone: the kid's time, apps, websites, bedtime
   - ask for more time, do a chore for more time, or use a code.
 
   While the phone is locked, only family can call in (this needs call screening, which the setup screen asks for).
-- **Texts** to and from family are sent and shown inside the launcher, so they work even when time is up.
+- **Texts.** The app is the phone's texting app, with its own Texts screen (plain texts, picture texts and group
+  texts). The kid can text family any time and friends a grown-up said yes to (not at bedtime or when time is up:
+  those wait). A text from any other number is held for the grown-ups, and blocked numbers are dropped. "Ask to add a
+  friend" sends the request to the parent console. A copy of every text goes to the parent console.
+- **The Phone menu** is for calls only: family, friends a grown-up said yes to (not while the phone is locked), and
+  the last calls.
+- **Camera, My photos and Movie Maker.** Photos and videos with stickers and filters, and movies made from them
+  (clips, music, words, voice). Everything stays on the phone and a copy goes to the parent console. Photos can be
+  sent in Texts; videos and movies are sent to family as a link. Closed at bedtime and when time is up.
+- **Sound and screen.** Sound on, Vibrate or Mute (calls from family still ring), volumes, brightness, when the screen
+  turns off, text size, turning the screen with the phone, and screen off / restart.
 - **Safe browsing** is a VPN that only handles DNS. It forces SafeSearch on Google, Bing and DuckDuckGo and
   Restricted Mode on YouTube, and blocks encrypted-DNS services that would skip it. Android keeps it always on.
 - **Website tiles** open in a simple built-in browser. It only goes to the kid's allowed websites, within their
@@ -30,7 +40,8 @@ applies them on the kid's Android phone: the kid's time, apps, websites, bedtime
 - **New apps come in two ways:**
   - A grown-up's PIN opens the Play Store for a few minutes. Whatever is installed in that window is allowed.
   - The parent console pushes an APK, which installs silently.
-- **Updates** install by themselves when the screen is off.
+- **Updates** install by themselves when the screen is off. A phone set up without the QR code (quick install) asks
+  once per version instead, with a notification to tap; pushed APKs work the same way there.
 
 The app's id is `com.familyscreenwarden.kids`; its device-admin receiver is
 `com.familyscreenwarden.kids/.admin.KidsAdminReceiver`.
@@ -47,7 +58,11 @@ The app's id is `com.familyscreenwarden.kids`; its device-admin receiver is
 
 A grown-up's screen PIN (or an emergency code from the parent console) opens the grown-up menu from the **Grown-up**
 button. From there you can add time, lock the phone, open the phone's settings for 15 minutes (to add a Google
-account, for example), open the Play Store, change the colours, and update the app.
+account, for example), open the Play Store, change the colours, let the screen turn with the phone, and update the app.
+
+**Turning the screen.** Android only lets an app switch auto-rotate once a grown-up has allowed "Modify system
+settings" for it, and the app can't allow that by itself. Grown-up › **Let the screen turn with the phone** opens that
+Android screen for three minutes: switch it on, press Back. After that the kid's own switch in Sound and screen works.
 
 **Without the QR code** (for testing on your own phone), install the APK and type a setup code. The server address is
 already filled in (`https://app.familyscreenwarden.com`); change it only if you run your own server. Installed this
@@ -66,12 +81,17 @@ folder must sit next to this one. `VERSION` holds major.minor; the build number 
 
 To look at the launcher without a phone, serve `../launcher` with any static web server and open
 `index.html?phone` (phone) or `index.html` (computer). It shows sample data. Add `&timeup`, `&bedtime`,
-`&parentlock`, `&ringing` or `&oncall` to see those screens.
+`&parentlock`, `&ringing`, `&oncall`, `&unread`, `&dialog=phone` or `&dialog=sound` to see those screens.
+
+The Texts and Camera pages are in `app/src/main/assets/texts` and `app/src/main/assets/studio`. They also show sample
+data in a browser (`texts/index.html?view=chat|new|ask`, `&bed`; `studio/index.html?view=camera|photos|viewer|movie|
+making|done|closed`). Their fonts are the launcher's: in the app, `/fonts/…` is answered from `launcher/fonts`, so in
+a browser serve a copy of `../launcher/fonts` next to each page or the text falls back to the system font.
 
 GitHub Actions has a workflow called **Android app** (`.github/workflows/android.yml`):
 
-- **Every push** that touches `android/` or `launcher/` builds the app and runs the unit tests (and the server's own
-  tests). The APK is kept as a workflow artifact for 7 days.
+- **Every push** that touches `android/` or `launcher/` builds the app and runs the unit tests (`CoreTest`,
+  `StudioTest`, `TextsTest`; and the server's own tests), and checks that no page loads anything from the internet. The APK is kept as a workflow artifact for 7 days.
 - With the signing secrets it builds a **signed release APK**; without them, a **debug APK** for testing only.
 
 ## Signing key: important
@@ -107,7 +127,13 @@ All server traffic is in one file, `app/src/main/java/com/familyscreenwarden/kid
 
 - `POST /api/warden/setup/check`, `/api/warden/sync`, `/api/warden/launcher`, `/api/warden/launcher/act`,
   `/api/warden/pin`, `/api/warden/redeem` (shared with the Windows app);
-- `POST /api/android/pair`, `POST /api/android/request`, plus the APK and update downloads the sync answer points to.
+- `POST /api/android/pair`, `POST /api/android/request`, plus the APK and update downloads the sync answer points to;
+- Texts: the sync carries `texts` and its answer `texting`; `POST /api/android/friend`;
+  `POST /api/android/text-media/:msgId/:mediaId` (a photo, raw);
+- Camera and Movie Maker: `POST /api/android/media` (raw, described by `X-Media-*` headers),
+  `POST /api/android/media/:id/deleted`, `/link` and `/family-screen`.
+
+[SERVER-CONTRACT-CHANGES.md](SERVER-CONTRACT-CHANGES.md) has every new or changed call with its body and answer.
 
 The setup QR hands the app two extras: `server` (the server's address) and `code` (the setup code). The quick-install
 link is `screenwarden://setup?server=https://…&code=…`.
@@ -119,5 +145,10 @@ See [PORTING-NOTES.md](PORTING-NOTES.md) for what was changed when this app was 
 - **Not yet built or tried on a real phone under this name.** See PORTING-NOTES.md for exactly what was checked.
 - **Usage access** can't be switched on by a device owner, so setup asks for it once. Without it, time only counts
   for apps opened from the launcher.
+- **Texts** need the app to be the phone's texting app. The QR setup makes it so on Android 10 and newer; otherwise
+  the setup screen asks. Picture texts depend on the carrier's settings on the phone.
+- **Camera** needs the camera and microphone permissions. The QR setup grants them; a quick-install phone asks.
+- **Brightness and screen timeout** can only be set on a QR-set-up phone, or after "Modify system settings" is
+  allowed. Otherwise only this app's own screens get brighter or darker.
 - **Play Store window:** Android can't limit the Play Store to one app. While a grown-up has it open, anything
   installed is allowed, and it closes after the minutes set in the parent console.
