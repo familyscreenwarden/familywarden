@@ -1,6 +1,8 @@
 import type { Pool, PoolClient } from 'pg';
 import { mediaFile, removeFile } from './files';
 import { MEDIA_KEEP_DAYS, kidMediaFile, sweepMediaFiles } from './media';
+import type { LevelId, TextingWho, WebMode } from './levels';
+import { DEFAULT_KEEP_DAYS } from './location';
 import { evaluateRules, localTime, type RuleResult } from './rules';
 
 export type Db = Pool | PoolClient;
@@ -49,6 +51,13 @@ export interface KidRow {
   phone_block_usb: boolean;
   phone_emergency_number: string;
   phone_play_minutes: number;
+  /** Levels and safe browsing (levels.ts). `web_mode` 'sites' is the same thing as `only_allowed_sites`. */
+  level: LevelId | null;
+  birthday: string | null;
+  web_mode: WebMode;
+  web_categories: string[];
+  web_blocked: string[];
+  texting_who: TextingWho;
 }
 
 export interface DeviceRow {
@@ -327,6 +336,7 @@ export async function lockExpiredTrials(db: Db): Promise<number> {
  * videos past their keep time, and files on disk that no row owns any more.
  */
 export async function purgeExpired(db: Db, dataDir?: string): Promise<void> {
+  await purgeLocations(db);
   await db.query("DELETE FROM login_tokens WHERE expires_at < now() - interval '1 day'");
   await db.query('DELETE FROM sessions WHERE expires_at < now()');
   await db.query("DELETE FROM pairing_codes WHERE expires_at < now() - interval '1 day'");
@@ -367,5 +377,32 @@ export async function sweepOrphanFiles(db: Db, dataDir: string, now: number = Da
       },
     },
     now,
+  );
+}
+
+/** Check-ins are kept this long. */
+export const CHECKIN_KEEP_DAYS = 90;
+/** However often a phone reports, one kid never has more positions than this: the oldest go first. */
+export const MAX_POINTS_PER_KID = 50_000;
+
+/**
+ * Where the kids' phones were: positions and arrive / leave older than the kid's keep time (1, 30 or 90 days; 30
+ * when the parent never chose) are removed, check-ins after 90 days, and anything past the per-kid cap.
+ */
+export async function purgeLocations(db: Db): Promise<void> {
+  for (const table of ['kid_locations', 'kid_place_events']) {
+    await db.query(
+      `DELETE FROM ${table} l USING kids k LEFT JOIN kid_location_settings s ON s.kid_id = k.id
+        WHERE l.kid_id = k.id AND l.at < now() - make_interval(days => COALESCE(s.keep_days, $1))`,
+      [DEFAULT_KEEP_DAYS],
+    );
+  }
+  await db.query('DELETE FROM kid_checkins WHERE at < now() - make_interval(days => $1)', [CHECKIN_KEEP_DAYS]);
+  await db.query(
+    `DELETE FROM kid_locations l USING (
+       SELECT kid_id, (SELECT at FROM kid_locations x WHERE x.kid_id = c.kid_id ORDER BY at DESC OFFSET $1 LIMIT 1) AS cut
+         FROM (SELECT kid_id FROM kid_locations GROUP BY kid_id HAVING count(*) > $1) c) old
+      WHERE l.kid_id = old.kid_id AND l.at <= old.cut`,
+    [MAX_POINTS_PER_KID],
   );
 }

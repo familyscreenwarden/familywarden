@@ -17,6 +17,7 @@ import android.util.Log
 import com.familyscreenwarden.kids.admin.KidsAdminReceiver
 import com.familyscreenwarden.kids.core.PhoneRules
 import com.familyscreenwarden.kids.core.SafeSearchInfo
+import com.familyscreenwarden.kids.core.WebInfo
 
 /**
  * Everything the app does as the phone's device owner. Each call is safe to repeat; nothing here throws (a phone that
@@ -42,7 +43,10 @@ class Policy(context: Context) {
         for (p in listOf(Manifest.permission.CALL_PHONE, Manifest.permission.SEND_SMS, Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CALL_LOG, Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS,
             Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_MMS, Manifest.permission.RECEIVE_WAP_PUSH, Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO) +
+            Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO,
+            // The live map (Where.kt): precise location, also while the screen is off (background after fine).
+            Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION) +
+            (if (Build.VERSION.SDK_INT >= 29) listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION) else emptyList()) +
             (if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_MEDIA_IMAGES) else listOf(Manifest.permission.READ_EXTERNAL_STORAGE)))
             dpm.setPermissionGrantState(admin, ctx.packageName, p, DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
         // Family Screen Warden is the phone's call app: its call screen with family names (Android 14+; older phones ask at setup).
@@ -150,11 +154,15 @@ class Policy(context: Context) {
         dpm.setAlwaysOnVpnPackage(admin, if (on) ctx.packageName else null, false)
     }
 
-    /** Chrome (if a grown-up allows it): only the websites the server allows, SafeSearch and YouTube's Restricted Mode. */
-    fun chrome(hosts: List<String>, s: SafeSearchInfo) = owner("chrome") {
+    /**
+     * Chrome (if a grown-up allows it): the websites the server allows (only those, or anything but the blocked ones with a
+     * filtered web), SafeSearch and YouTube's Restricted Mode.
+     */
+    fun chrome(hosts: List<String>, s: SafeSearchInfo, web: WebInfo = WebInfo()) = owner("chrome") {
         val list = { l: List<String> -> l.joinToString(",", "[", "]") { "\"" + it.replace("\"", "") + "\"" } }
+        val filtered = web.mode == "filtered" || web.mode == "open"
         val b = Bundle().apply {
-            putString("URLBlocklist", list(listOf("*")))
+            putString("URLBlocklist", list(if (filtered) web.block.take(1000) else listOf("*")))
             putString("URLAllowlist", list(hosts + listOf("chrome://policy")))
             putBoolean("ForceGoogleSafeSearch", s.search)
             putInt("ForceYouTubeRestrict", if (s.youTube) 1 else 0)

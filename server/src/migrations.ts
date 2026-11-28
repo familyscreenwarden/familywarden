@@ -386,4 +386,110 @@ export const migrations: Migration[] = [
       ALTER TABLE requests ADD COLUMN note text, ADD COLUMN phone text;
     `,
   },
+  {
+    // Kids' levels (Little kid, Big kid, Teen) and one set of safe-browsing rules for every device (levels.ts).
+    // "Only allowed websites" on becomes web_mode 'sites' (nothing changes for those kids). Off becomes 'open',
+    // and the websites the parent had switched off for that kid become that kid's blocked list.
+    id: '004_levels_web',
+    sql: `
+      ALTER TABLE kids
+        ADD COLUMN level text CHECK (level IN ('little','big','teen')),
+        ADD COLUMN birthday date,
+        ADD COLUMN web_mode text NOT NULL DEFAULT 'sites' CHECK (web_mode IN ('sites','filtered','open')),
+        ADD COLUMN web_categories text[] NOT NULL DEFAULT '{}',
+        ADD COLUMN web_blocked text[] NOT NULL DEFAULT '{}',
+        ADD COLUMN texting_who text NOT NULL DEFAULT 'friends' CHECK (texting_who IN ('family','friends','anyone'));
+
+      UPDATE kids SET web_mode = 'open' WHERE NOT only_allowed_sites;
+      UPDATE kids k
+         SET web_blocked = COALESCE(
+               (SELECT array_agg(x.identifier ORDER BY x.identifier)
+                  FROM (SELECT a.identifier FROM apps a
+                         WHERE a.kid_id = k.id AND a.kind = 'site' AND NOT a.allowed
+                         ORDER BY a.identifier LIMIT 500) x),
+               '{}')
+       WHERE NOT k.only_allowed_sites;
+
+      CREATE INDEX blocked_events_kid_idx ON blocked_events (kid_id, at DESC);
+    `,
+  },
+  {
+    // The live map: where the kids' phones are, family places with arrive / leave, check-ins, "Ring phone"
+    // (routes/location.ts). Every row carries the family it belongs to. Points go with the kid, the phone or the
+    // family they came from, and housekeeping removes them after the kid's keep_days.
+    id: '005_kid_location',
+    sql: `
+      CREATE TABLE kid_location_settings (
+        kid_id uuid PRIMARY KEY REFERENCES kids(id) ON DELETE CASCADE,
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        sharing boolean NOT NULL DEFAULT true,
+        alerts boolean NOT NULL DEFAULT true,
+        keep_days integer NOT NULL DEFAULT 30 CHECK (keep_days IN (1, 30, 90)),
+        live_until timestamptz,
+        ring_id uuid,
+        ring_at timestamptz
+      );
+
+      CREATE TABLE family_places (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        lat double precision NOT NULL CHECK (lat BETWEEN -90 AND 90),
+        lng double precision NOT NULL CHECK (lng BETWEEN -180 AND 180),
+        radius_m integer NOT NULL DEFAULT 150 CHECK (radius_m BETWEEN 50 AND 2000),
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX family_places_account_idx ON family_places (account_id);
+
+      CREATE TABLE kid_locations (
+        id bigserial PRIMARY KEY,
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        device_id uuid REFERENCES devices(id) ON DELETE CASCADE,
+        lat double precision NOT NULL CHECK (lat BETWEEN -90 AND 90),
+        lng double precision NOT NULL CHECK (lng BETWEEN -180 AND 180),
+        accuracy real,
+        battery integer,
+        charging boolean,
+        at timestamptz NOT NULL,
+        place_id uuid REFERENCES family_places(id) ON DELETE SET NULL
+      );
+      CREATE INDEX kid_locations_kid_idx ON kid_locations (kid_id, at DESC);
+      CREATE INDEX kid_locations_at_idx ON kid_locations (at);
+
+      CREATE TABLE kid_place_state (
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        place_id uuid NOT NULL REFERENCES family_places(id) ON DELETE CASCADE,
+        inside boolean NOT NULL,
+        since timestamptz NOT NULL,
+        PRIMARY KEY (kid_id, place_id)
+      );
+
+      CREATE TABLE kid_place_events (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        place_id uuid REFERENCES family_places(id) ON DELETE SET NULL,
+        place_name text NOT NULL,
+        kind text NOT NULL CHECK (kind IN ('arrive','leave')),
+        at timestamptz NOT NULL
+      );
+      CREATE INDEX kid_place_events_kid_idx ON kid_place_events (kid_id, at DESC);
+
+      CREATE TABLE kid_checkins (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kid_id uuid NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
+        device_id uuid REFERENCES devices(id) ON DELETE SET NULL,
+        kind text NOT NULL CHECK (kind IN ('ok','pickup','help')),
+        lat double precision,
+        lng double precision,
+        accuracy real,
+        at timestamptz NOT NULL DEFAULT now(),
+        answer text,
+        answered_at timestamptz
+      );
+      CREATE INDEX kid_checkins_account_idx ON kid_checkins (account_id, at DESC);
+    `,
+  },
 ];

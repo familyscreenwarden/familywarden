@@ -225,3 +225,50 @@ contract. Every item of `SERVER-CONTRACT-CHANGES.md` has a test in `test/android
 - **One-tap answer links** from emails or push messages for friend requests (there are no notifications; a parent
   answers in the console), and the note to parents when a stranger's text is held.
 - **A parents' control for sound, screen or rotation**: the app keeps those on the phone and sends nothing.
+
+
+## Levels, safe browsing and the live map (added with the app's shared web rules and location)
+
+The app's code in `android/`, the 28 November section of its `SERVER-CONTRACT-CHANGES.md` and the server the app was
+first written for were the contract. Every item of that section (calls 9 to 12) has a test in `test/android.test.ts`
+("levels and safe browsing", "live map"), `test/levels-routes.test.ts` or `test/location-routes.test.ts`.
+
+### Map tiles: pick a provider before launch
+
+**The public OpenStreetMap tile servers (`tile.openstreetmap.org`, the default of `MAP_TILE_URL`) have a usage policy
+that a commercial service proxying tiles for its customers may not satisfy.** They are run by volunteers on donated
+servers, give no guarantee, and their policy asks heavy or commercial users to use another source. This server does
+what that policy asks of any client (a User-Agent that says who is asking, tiles kept at least a week, few
+connections, no bulk download, the credit on the map), but that does not make a paid product an allowed user.
+**Before launch the owner should pick a tile provider** (a paid tile service, or tiles hosted by ourselves), set
+`MAP_TILE_URL` to its template (an API key can be part of the address; it never reaches a browser),
+`MAP_TILE_ATTRIBUTION` and `MAP_TILE_ATTRIBUTION_URL` to the credit that provider asks for, and check that the
+provider allows keeping tiles on our disk for 14 days. The server logs a reminder at every start while the default is
+in use. `MAP_TILE_URL=off` runs the map without tiles (the kids on a plain background).
+
+### Read one way or another
+
+- **Kids who had "Only allowed websites" off are on the open web after the migration**, with the websites that were
+  switched off in their list as their blocked list. On phones that switch never had an effect before (the built-in
+  browser only opened listed sites), so for those kids the phone now really opens other websites. This is what the
+  parent had set; a parent who wants a filter picks "Filtered web" or a level.
+- **A website switched off in the list is "not on the list", not "blocked"**, from now on. Blocking by name is its own
+  list (`web_blocked`).
+- **Bedtime has one switch here.** A level sets both bedtime starts and switches bedtime on; wake-up times stay. With
+  bedtime off, both bedtimes show as changed.
+- **"Today" for a birthday and "blocked today"** follow the rule clock; the map uses the real clock.
+- **A phone with sharing off gets 200**, not an error (the app retries errors every 5 seconds).
+- **The simple `/api/device` API is unchanged**: it still sends `safe.onlyAllowedSites` and no `web`.
+- **Removing a phone removes its positions** (kept photos and texts stay, as before); its check-ins stay 90 days.
+- **Emails.** A check-in, and arriving at or leaving a place when that is switched on, is emailed to the family's
+  address through Amazon SES. Without SES nothing is sent and nothing about it is logged: check-ins then show on
+  the Map page only, although the kid reads "Sent to your parents".
+- **Ring phone** works with sharing off too (it sends no position).
+
+### Left out
+
+- Address search and "near <street>": they would send addresses and children's positions to an outside look-up
+  service. Places are made by tapping the map.
+- "Directions" links (they put a child's position into another site's address), fetching tiles ahead around the
+  kids, emoji on places, music, bedside and wall screens, the assistant.
+- The Map and "Levels and web" pages are not in the web app's mock mode.

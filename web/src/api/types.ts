@@ -340,3 +340,72 @@ export interface KidMedia {
   quotaBytes: number;
   items: KidMediaItem[];
 }
+
+// ---- Levels and safe browsing (one set of website rules for every device of a kid) ----
+
+export type WebMode = 'sites' | 'filtered' | 'open';
+export type TextingWho = 'family' | 'friends' | 'anyone';
+export type LevelId = 'little' | 'big' | 'teen';
+
+export interface LevelSettings {
+  schoolMinutes: number;
+  offMinutes: number;
+  /** 'HH:MM', or '' when bedtime is off. */
+  schoolBedtime: string;
+  otherBedtime: string;
+  webMode: WebMode;
+  categories: string[];
+  safeSearch: boolean;
+  youTube: boolean;
+  texting: TextingWho;
+}
+
+export interface Level { id: LevelId; name: string; ages: string; fromAge: number; settings: LevelSettings }
+export interface WebCategory { id: string; name: string; sites: number }
+
+export interface KidSafety {
+  kid: { id: string; name: string };
+  level: LevelId | null;
+  birthday: string | null;
+  /** The level for the kid's age, when it is not the one in use. */
+  suggested: LevelId | null;
+  next: { level: Level; on: string } | null;
+  levels: Level[];
+  changes: { key: string; label: string; level: string; now: string }[];
+  settings: LevelSettings;
+  blockPrivate: boolean;
+  web: { mode: WebMode; categories: string[]; blocked: string[]; allowed: string[] };
+  categories: WebCategory[];
+  devices: { id: string; name: string; platform: Platform; lastSeenAt: string | null; appVersion: string | null }[];
+  blockedToday: { host: string; at: string; devices: string[]; category: string | null }[];
+}
+
+export interface WebPatch { mode?: WebMode; categories?: string[]; safeSearch?: boolean; youTube?: boolean; blockPrivate?: boolean }
+
+// ---- The live map of the kids' phones ----
+
+export type CheckInKind = 'ok' | 'pickup' | 'help';
+export type KeepDays = 1 | 30 | 90;
+
+export interface MapPlace { id: string; name: string; lat: number; lng: number; radius: number }
+export interface MapKid {
+  id: string;
+  name: string;
+  color: string;
+  sharing: boolean;
+  alerts: boolean;
+  keepDays: KeepDays;
+  /** A parent has the map open: the phone reports every few seconds. */
+  live: boolean;
+  phone: string | null;
+  last: { lat: number; lng: number; accuracy: number | null; at: string; battery: number | null; charging: boolean | null; place: { id: string; name: string } | null } | null;
+  /** Today's positions, oldest first: [lat, lng, time]. */
+  trail: [number, number, string][];
+  events: { placeName: string; kind: 'arrive' | 'leave'; at: string }[];
+  ringing: boolean;
+}
+export interface MapCheckIn { id: string; kidId: string; kind: CheckInKind; lat: number | null; lng: number | null; at: string; answer: string | null; answeredAt: string | null }
+export interface MapTiles { enabled: boolean; attribution: string; attributionUrl: string; maxZoom: number }
+export interface FamilyMap { kids: MapKid[]; places: MapPlace[]; checkins: MapCheckIn[]; tiles: MapTiles; keepDaysOptions: KeepDays[] }
+export interface KidTrail { day: string; trail: [number, number, string][]; events: { placeName: string; kind: 'arrive' | 'leave'; at: string }[] }
+export interface LocationSettings { sharing?: boolean; alerts?: boolean; keepDays?: KeepDays }

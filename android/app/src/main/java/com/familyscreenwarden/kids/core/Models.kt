@@ -73,7 +73,16 @@ fun msIso(ms: Long): String = java.time.Instant.ofEpochMilli(ms).toString()
     val asked: List<AskedFriend> = emptyList(),
     val blocked: List<String> = emptyList(),
     val drop: List<String> = emptyList(),
+    /** Who the kid can text: family, friends (family and approved friends) or anyone (the kid's level). */
+    val who: String = "friends",
 )
+/**
+ * Safe browsing, the same rules the Windows app gets: mode "sites" (only the kid's sites), "filtered" (anything but
+ * the blocked hosts and words) or "open" (anything but the blocked hosts). The kid's sites are always allowed.
+ */
+/** The live map: sharing on, "live" while a grown-up has the map open, a Ring phone id. */
+@Serializable data class LocationInfo(val sharing: Boolean = true, val live: Boolean = false, val ring: String? = null)
+@Serializable data class WebInfo(val mode: String = "sites", val block: List<String> = emptyList(), val words: List<String> = emptyList())
 @Serializable data class ApkInstall(val id: String = "", val name: String = "", val url: String = "", val sha256: String = "", val size: Long = 0)
 
 @Serializable data class Snapshot(
@@ -93,6 +102,8 @@ fun msIso(ms: Long): String = java.time.Instant.ofEpochMilli(ms).toString()
     val requests: List<RequestInfo> = emptyList(),
     val voidUnlocks: List<Long> = emptyList(),
     val safeSearch: SafeSearchInfo = SafeSearchInfo(),
+    val web: WebInfo = WebInfo(),
+    val location: LocationInfo? = null,
     val launcher: LauncherSettings = LauncherSettings(),
     val watchOnly: Boolean? = null,
     val bedtime: BedtimeInfo? = null,
@@ -140,6 +151,8 @@ data class InstalledApp(val pkg: String, val label: String)
     var asked: MutableMap<String, String> = mutableMapOf(),
     /** Apps the kid tried that aren't allowed (package → name, when), for "Recently blocked". */
     var blocked: MutableMap<String, Blocked> = mutableMapOf(),
+    /** Websites that were blocked (host → when), for "Blocked today" in the parent console. */
+    var blockedSites: MutableMap<String, Long> = mutableMapOf(),
     var bedtimeSkipUntilMs: Long? = null,
     var shutdownId: String? = null,
     /** A grown-up opened the Play Store until then (to install an app they said yes to). */

@@ -276,3 +276,94 @@ Not checked, so the first CI build and a real phone are the test:
 3. `WardenApi.sendFile` is new code written for this port.
 4. The server side of SERVER-CONTRACT-CHANGES.md was being written at the same time and was not tried against this app.
 5. The page that a video link opens is the server's; the app only passes the link on.
+
+---
+
+# Third update: levels and shared safe browsing, texting by level, location (28 November)
+
+The source changed again (two changes: the kids' levels with one set of safe-browsing rules for computers and
+phones, and location for a live map with Check in and Ring phone). All of it was brought in.
+
+## What came in
+
+- **Safe browsing by level:** `core/WebFilter.kt` (new), `SafeVpn.kt` (blocked names get "no such name" for every
+  app with a filtered or open web), `SiteActivity.kt` (uses WebFilter; a refused site opens the blocked screen
+  instead of a toast), `Policy.chrome` (Chrome's block list), `core/Models.kt` (`WebInfo`, `Snapshot.web`,
+  `PhoneState.blockedSites`), `Kids.kt` (`siteBlocked`, `askSite`, `blockedSites` in the sync).
+- **"This site is blocked":** `BlockedActivity.kt` (new) and its manifest entry.
+- **Texting by level:** `TextingInfo.who`, `TextRules.People(who)`, `Texts.people()`.
+- **Location:** `Where.kt` (new), the 5-second loop in `Kids.start`, `Where.ringIfAsked` after each sync,
+  `phone.location` in the page state, the `checkin` and `stop-ring` commands, `LauncherActivity` (the ring's
+  notification stops it), `KidsService` (also a location foreground service once the permission is there),
+  `Policy` (the device owner grants the three location permissions), manifest (4 permissions,
+  `foregroundServiceType="specialUse|location"`), `LocationInfo` and `Snapshot.location`.
+- **Launcher:** the Check in block in the Phone menu and on the lock screen, the `checkin` message, sample data.
+- The unit test `WebFilterTest.kt` (3 tests: the two web modes and texting levels).
+
+How: the source's change was put through the port's renames and applied to this app's files; one piece needed a
+hand (`Policy.chrome`, where the port's comment differed). The two new screens' wording and colours were then done
+by hand.
+
+## Where this differs from the source
+
+- **Nothing on the wire** (see SERVER-CONTRACT-CHANGES.md, 28 November).
+- **Location behaviour is the source's, line for line**: when it reports, which provider, the accuracy and age
+  limits, the 30 minutes after "come get me" / "help", the ring. `Where.kt` differs from the source only in the
+  package, `WardenApi`, one private name and the wording of comments and one message.
+- **"This site is blocked" screen:** the dashboard colours (background `#04060f`, a card `#080c22` with a `#141b3f`
+  line, inset rows `#0e1433`, green "Ask a grown-up", outlined "Go back", 8 dp corners) and no emoji: the shield is
+  the app's own line drawing (`ic_notify`) in the warning colour, the top row reads "Blocked · <site>", and the
+  button says "Asked" / "Allowed" without a tick. It is a native screen, like the setup screens, so it uses the
+  phone's own font, not the bundled Space Grotesk / Inter (those are web fonts for the pages). It needs no network
+  to show. Layout, wording of the sentences and behaviour are the source's.
+- **Launcher Check in block:** an inset block with a small pin drawing and three text buttons (no emoji); "I need
+  help now" is outlined in the danger colour and fills when armed ("Tap again to send for help"). In the source the
+  lock screen's block sat under its emergency button; here it is inside the "You can still reach family" card (the
+  lock screen's emergency button is at the bottom in this launcher). In the old "Text family" list (apps without
+  their own Texts screen) the block is hidden; it shows in the Phone menu. Sideways and wide, the three buttons sit
+  in a row.
+- **Sample data:** `&live` and `&noshare` were added to the browser preview.
+
+## Line counts (lines the source added / removed → here)
+
+| File | Source | Here |
+| --- | --- | --- |
+| `AndroidManifest.xml` | 8 / 1 | 8 / 1 |
+| `BlockedActivity.kt` (new) | 119 | 128 (the re-skin) |
+| `Where.kt` (new) | 214 | 214 |
+| `core/WebFilter.kt` (new) | 38 | 38 |
+| `test WebFilterTest.kt` (new) | 40 | 40 |
+| `Kids.kt` | 76 / 2 | 76 / 2 |
+| `KidsService.kt` | 9 / 1 | 9 / 1 |
+| `LauncherActivity.kt` | 6 / 0 | 6 / 0 |
+| `Policy.kt` | 12 / 4 | 12 / 4 |
+| `SafeVpn.kt` | 10 / 1 | 10 / 1 |
+| `SiteActivity.kt` | 6 / 9 | 6 / 9 |
+| `Texts.kt` | 1 / 1 | 1 / 1 |
+| `core/Models.kt` | 13 / 0 | 13 / 0 |
+| `core/TextRules.kt` | 5 / 3 | 5 / 3 |
+
+## Checked, and not
+
+Still **not compiled**: there is no Android SDK on this machine. What ran:
+
+- The pure-Kotlin tests with Gradle's bundled Kotlin 2.0.21 compiler (`core/*.kt` and the four test files; not the
+  project's compiler, no serialization plugin): **40 tests, all passed** (the 37 from before plus WebFilterTest's 3).
+- Every Kotlin file's `package` matches its folder; every `com.familyscreenwarden…` import resolves; every
+  component in the manifest has a class; the four location permissions and the service's `location` type are in the
+  manifest and match what `Policy.kt` grants and `KidsService.kt` starts; all XML and the workflow YAML parse.
+- `node --check` on the four page scripts; the workflow's own page check passes here.
+- No file, name or text in `android/`, `launcher/` or `.github/` mentions the source product or its game.
+- Headless Chrome with the app's bridge stubbed, at 390x844, 844x390 and 1280x720: the Phone menu with the Check
+  in block (sharing, live, the armed help button, sharing off), the lock screen, the home screen. The messages the
+  page sent were read back (`checkin` with `ok` / `help`; the first tap on help sends nothing). No console errors
+  from the page, no request outside the page, bundled fonts loaded.
+
+Not checked, so the first CI build and a real phone are the test:
+
+1. `Where.kt`, `BlockedActivity.kt` and the merged Android-facing files have not been through a compiler here.
+2. Real positions, the foreground-service type on Android 14 and newer, background location, the ring, the blocked
+   screen and its notification, Chrome's block list, the DNS filter with a real list.
+3. The server side (written at the same time by someone else) was not tried against this app.
+4. Play policy: background location and the `location` foreground-service type need a declaration if the app is
+   ever listed in a store. It is not, today.

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
+import http, { type Server } from 'node:http';
 import type { Pool } from 'pg';
 import { createApp } from '../src/app';
 import { loadConfig, type Config } from '../src/config';
@@ -39,6 +39,8 @@ export interface TestServer {
   setNow(date: Date): void;
   /** Sign-in links the fake mailer was asked to send. */
   sent: Array<{ email: string; link: string }>;
+  /** Notices (check-ins, arrive / leave) the fake mailer was asked to send. */
+  notices: Array<{ email: string; subject: string; text: string }>;
   close(): Promise<void>;
 }
 
@@ -62,15 +64,19 @@ export async function startServer(
   // (test/android.test.ts covers that). DATA_DIR is a throwaway folder.
   const config = loadConfig({
     DATABASE_URL: TEST_DATABASE_URL, PORT: '0', PUBLIC_URL: 'http://console.test', DEV_LINKS: '1', WEB_DIST: '/nonexistent/fsw-web-dist',
-    BILLING_ENABLED: '1', DATA_DIR: TEST_DATA_DIR, ...env,
+    BILLING_ENABLED: '1', DATA_DIR: TEST_DATA_DIR, MAP_TILE_URL: 'off', ...env,
   });
   const pool = createPool(config.databaseUrl);
   await migrate(pool);
   let now = WEDNESDAY_AFTERNOON;
   const sent: Array<{ email: string; link: string }> = [];
+  const notices: Array<{ email: string; subject: string; text: string }> = [];
   const mailer: Mailer = {
     async sendSignInLink(email, link) {
       sent.push({ email, link });
+    },
+    async sendNotice(email, subject, text) {
+      notices.push({ email, subject, text });
     },
   };
   const app = createApp({ pool, config, mailer, now: () => now, fetchImpl: options.fetchImpl,
@@ -86,6 +92,7 @@ export async function startServer(
     pool,
     config,
     sent,
+    notices,
     setNow(date) {
       now = date;
     },
@@ -177,4 +184,38 @@ export async function pairDevice(
   if (paired.status !== 201) throw new Error(`pair failed: ${paired.status} ${paired.text}`);
   device.bearer = paired.body.deviceToken as string;
   return { device, deviceId: paired.body.deviceId as string };
+}
+
+/** A small PNG-looking picture: the PNG signature, then the tile's own name so tests can tell tiles apart. */
+export function fakeTile(name: string): Buffer {
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(name)]);
+}
+
+export interface TileSource {
+  /** What to put in MAP_TILE_URL. */
+  template: string;
+  /** Every request the stand-in got: the path and the User-Agent. */
+  hits: Array<{ path: string; userAgent: string }>;
+  /** What the stand-in answers: tiles, an error, or something that is not a picture. */
+  mode: 'ok' | 'down' | 'html';
+  close(): Promise<void>;
+}
+
+/** A stand-in for a map tile provider, on this machine (real tile servers cannot be reached from the tests). */
+export async function startTileSource(): Promise<TileSource> {
+  const source: TileSource = { template: '', hits: [], mode: 'ok', close: async () => undefined };
+  const server = http.createServer((req, res) => {
+    source.hits.push({ path: req.url ?? '', userAgent: String(req.headers['user-agent'] ?? '') });
+    if (source.mode === 'down') {
+      res.writeHead(503).end('busy');
+    } else if (source.mode === 'html') {
+      res.writeHead(200, { 'content-type': 'image/png' }).end('<html><script>alert(1)</script></html>');
+    } else {
+      res.writeHead(200, { 'content-type': 'image/png' }).end(fakeTile(req.url ?? ''));
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  source.template = `http://127.0.0.1:${(server.address() as AddressInfo).port}/t/{z}/{x}/{y}.png?key=test`;
+  source.close = () => new Promise<void>((resolve) => server.close(() => resolve()));
+  return source;
 }

@@ -74,6 +74,9 @@ Copy `.env.example` and fill it in, or set the same names in the environment. Th
 | `DATA_DIR` | in production | Folder for files: published app versions, uploaded APKs, kids' photos and videos, photos from texts (default `./data`, `/data` in Docker). Put it on a disk that is kept, with room for the videos |
 | `KID_MEDIA_QUOTA_MB` | no (5120) | Room for one kid's photos and videos, in megabytes. Full: new ones are not copied until a parent deletes some |
 | `PUBLISH_TOKEN` | to publish the Android app | Secret GitHub Actions sends to `POST /internal/android/publish`. 32+ characters (`openssl rand -hex 32`) |
+| `MAP_TILE_URL` | before launch | Where map tiles come from: an address with `{z}`, `{x}`, `{y}`. Not set: the public OpenStreetMap servers, which a paid service should not rely on (see NOTES.md). `off`: no tiles |
+| `MAP_TILE_ATTRIBUTION`, `MAP_TILE_ATTRIBUTION_URL` | with your own tiles | The credit your tile source asks for, shown on the map, and its link |
+| `MAP_TILE_CACHE_MB` | no (512) | Room for kept map tiles under `DATA_DIR/map-tiles`, in megabytes |
 
 Secrets never go in the repo.
 
@@ -102,8 +105,11 @@ TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/fsw_test npm test
 - `test/android.test.ts`: a phone walked through setup, sync, launcher, requests, chores, chat, texts, photos and videos, APK pushes and updates.
 - `test/media.test.ts`: kids' photos, videos and texts: what is kept, the limits, and who can reach what (families, siblings, phones, share links).
 - `test/media-unit.test.ts`: file signatures, paths, Range, share tokens, the sweep of ownerless files.
+- `test/levels.test.ts`, `test/location.test.ts`: the website rules and levels, and distances, places and tile addresses (no database).
+- `test/levels-routes.test.ts`: levels and safe browsing: the migration of earlier settings, what reaches the devices, the walls between families.
+- `test/location-routes.test.ts`: the live map: every privacy rule (who reads, who writes, sharing off, keep times, deleting) and the map tiles against a stand-in.
 
-`npm run test:unit` runs the unit tests (rules, crypto, compat, media) without a database. `npm run typecheck` checks source and tests.
+`npm run test:unit` runs the unit tests (rules, crypto, compat, media, levels, location) without a database. `npm run typecheck` checks source and tests.
 
 ## Docker
 
@@ -131,6 +137,8 @@ docker run -p 3000:3000 -v fsw-data:/data \
 | `src/routes/compat.ts`, `src/compat/logic.ts` | The kid-device API the Android app speaks (`/api/warden`, `/api/android`) |
 | `src/routes/phone.ts` | Parent routes for phones: setup QR, phone rules, chores, family chat, texts, APKs, codes |
 | `src/routes/media.ts`, `src/media.ts` | Kids' photos and videos: uploads from the phone, share links (`/m/<token>`), the parents' gallery |
+| `src/routes/levels.ts`, `src/levels.ts` | Kids' levels and one set of website rules for every device |
+| `src/routes/location.ts`, `src/location.ts`, `src/tiles.ts` | The live map: positions, places, check-ins, Ring phone, map tiles |
 | `src/releases.ts`, `src/files.ts` | Publishing and serving the Android app; files under `DATA_DIR` |
 | `src/routes/billing.ts`, `src/stripe.ts` | Billing routes, Stripe calls and webhook check |
 | `src/mail.ts` | Amazon SES email, signed by hand |

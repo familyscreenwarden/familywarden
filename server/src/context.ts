@@ -16,6 +16,8 @@ export interface Ctx {
   now: () => Date;
   /** Per-address limits (hits per window) for the routes that need no sign-in. */
   ipLimits: IpLimits;
+  /** How the server reaches other servers (map tiles). Tests replace it. */
+  fetchImpl: typeof fetch;
 }
 
 export interface IpLimits {
@@ -27,9 +29,11 @@ export interface IpLimits {
   pair: number;
   /** Any API call per minute. */
   api: number;
+  /** Map tiles per minute, per family (not per address). */
+  tiles: number;
 }
 
-export const DEFAULT_IP_LIMITS: IpLimits = { links: 30, verify: 60, pair: 20, api: 600 };
+export const DEFAULT_IP_LIMITS: IpLimits = { links: 30, verify: 60, pair: 20, api: 600, tiles: 300 };
 
 export const SESSION_COOKIE = 'fsw_session';
 export const SESSION_DAYS = 30;

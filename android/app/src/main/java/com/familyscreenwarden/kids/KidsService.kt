@@ -24,7 +24,15 @@ class KidsService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, LauncherActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n: Notification = NotificationCompat.Builder(this, "service").setSmallIcon(R.drawable.ic_notify).setContentTitle("Family Screen Warden")
             .setContentText("Screen time is on").setOngoing(true).setContentIntent(open).setPriority(NotificationCompat.PRIORITY_MIN).build()
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, n)
+        // Plus "location" once it's allowed (the live map keeps working with the screen off; Android 14 refuses it before).
+        val located = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        when {
+            Build.VERSION.SDK_INT >= 34 && located -> runCatching { startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }
+                .onFailure { startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) }
+            Build.VERSION.SDK_INT >= 34 -> startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            Build.VERSION.SDK_INT >= 29 && located -> startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            else -> startForeground(1, n)
+        }
         Kids.start()
         if (Kids.paired) SafeVpn.start(this)
         return START_STICKY

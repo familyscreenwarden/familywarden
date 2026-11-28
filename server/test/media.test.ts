@@ -655,7 +655,7 @@ describe('walls: texts', () => {
     assert.deepEqual([mine.asked, mine.blocked, mine.drop], [[{ name: 'Ava', phone: '5550142290', status: 'pending' }], ['5550190000'], ['m3']]);
     for (const [who, phone] of [['sibling', sibling.phone], ['other family', b.phone]] as Array<[string, Client]>) {
       const t = (await phone.post('/api/warden/sync', {})).body;
-      assert.deepEqual(t.texting, { friends: [], asked: [], blocked: [], drop: [] }, who);
+      assert.deepEqual(t.texting, { friends: [], asked: [], blocked: [], drop: [], who: 'friends' }, who);
       assert.deepEqual(t.phone.contacts, [], who);
       // Sending Ann's text ids with other words changes nothing of Ann's.
       await phone.post('/api/warden/sync', { texts: [{ id: 'm2', thread: ['5550102231'], dir: 'out', body: 'overwritten?', at: now, status: 'held' }] });

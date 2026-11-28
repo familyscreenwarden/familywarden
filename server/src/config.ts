@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isTileTemplate } from './location';
 
 export interface Config {
   databaseUrl: string;
@@ -21,7 +22,21 @@ export interface Config {
   dataDir: string;
   /** How much room one kid's photos and videos may take, in bytes. */
   kidMediaQuotaBytes: number;
+  /**
+   * Where map tiles come from: an address with {z}, {x} and {y} (empty = no tiles; the map still shows the kids).
+   * The server fetches them itself, keeps them under DATA_DIR/map-tiles and hands them to signed-in parents.
+   */
+  mapTileUrl: string;
+  /** True when MAP_TILE_URL was not set and the default (the public OpenStreetMap tile servers) is in use. */
+  mapTileDefault: boolean;
+  /** The credit the tile source asks for, shown on the map, and where it links to. */
+  mapTileAttribution: string;
+  mapTileAttributionUrl: string;
+  /** How much room the kept tiles may take, in bytes. */
+  mapTileCacheBytes: number;
 }
+
+export const DEFAULT_MAP_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 function flag(env: NodeJS.ProcessEnv, key: string): boolean {
   return ['1', 'true', 'yes', 'on'].includes(str(env, key).toLowerCase());
@@ -51,6 +66,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const trustProxy = Number(str(env, 'TRUST_PROXY') || '0');
   const quotaMb = Number(str(env, 'KID_MEDIA_QUOTA_MB') || '5120');
   if (!Number.isFinite(quotaMb) || quotaMb < 1 || quotaMb > 1024 * 1024) throw new Error('KID_MEDIA_QUOTA_MB must be a number of megabytes, 1 or more.');
+  const tileSetting = str(env, 'MAP_TILE_URL');
+  const tilesOff = ['off', 'none', 'no', '0', 'false'].includes(tileSetting.toLowerCase());
+  const mapTileUrl = tilesOff ? '' : tileSetting || DEFAULT_MAP_TILE_URL;
+  if (mapTileUrl && !isTileTemplate(mapTileUrl)) {
+    throw new Error('MAP_TILE_URL must be an http(s) address with {z}, {x} and {y} in it, for example https://tiles.example.com/{z}/{x}/{y}.png (or "off").');
+  }
+  const tileMb = Number(str(env, 'MAP_TILE_CACHE_MB') || '512');
+  if (!Number.isFinite(tileMb) || tileMb < 1 || tileMb > 1024 * 1024) throw new Error('MAP_TILE_CACHE_MB must be a number of megabytes, 1 or more.');
+  const attributionUrl = str(env, 'MAP_TILE_ATTRIBUTION_URL');
+  if (attributionUrl && !/^https?:\/\//i.test(attributionUrl)) throw new Error('MAP_TILE_ATTRIBUTION_URL must start with http:// or https://.');
+  const ownTiles = tileSetting !== '' && !tilesOff;
   return {
     databaseUrl,
     port,
@@ -68,5 +94,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     publishToken: str(env, 'PUBLISH_TOKEN'),
     dataDir: path.resolve(str(env, 'DATA_DIR') || path.resolve(__dirname, '..', 'data')),
     kidMediaQuotaBytes: Math.floor(quotaMb * 1024 * 1024),
+    mapTileUrl,
+    mapTileDefault: !ownTiles && !tilesOff,
+    // The default credit is OpenStreetMap's. With another source, set the credit that source asks for.
+    mapTileAttribution: (str(env, 'MAP_TILE_ATTRIBUTION') || (ownTiles ? '' : '© OpenStreetMap contributors')).slice(0, 200),
+    mapTileAttributionUrl: attributionUrl || (ownTiles ? '' : 'https://www.openstreetmap.org/copyright'),
+    mapTileCacheBytes: Math.floor(tileMb * 1024 * 1024),
   };
 }

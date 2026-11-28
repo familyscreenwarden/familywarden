@@ -9,6 +9,7 @@ const NAV_MAIN = [
   { to: '/kids', label: 'Kids and rules', d: 'M8 11a3 3 0 100-6 3 3 0 000 6z M2 20c0-3 3-5 6-5s6 2 6 5 M17 11a3 3 0 100-6 M22 20c0-3-2-4.5-4-5' },
   { to: '/devices', label: 'Devices', d: 'M3 5h18v11H3z M8 20h8 M12 16v4' },
   { to: '/requests', label: 'Requests', d: 'M6 16V11a6 6 0 0112 0v5l2 2H4z M10 21h4' },
+  { to: '/map', label: 'Map', d: 'M12 21s-7-6.2-7-11a7 7 0 0114 0c0 4.8-7 11-7 11z M12 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z' },
   { to: '/chat', label: 'Family chat', d: 'M4 5h16v11H9l-5 4z' },
   { to: '/reports', label: 'Reports', d: 'M4 20V10 M10 20V4 M16 20v-7 M22 20H2' },
   { to: '/safe-browsing', label: 'Safe browsing', d: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z' },

@@ -2,16 +2,17 @@ import { Link } from 'react-router-dom';
 import type { Kid } from '../api/types';
 import { safeColor, textOn } from '../lib/color';
 
-export type KidSection = 'rules' | 'phone' | 'texts' | 'photos';
+export type KidSection = 'rules' | 'levels' | 'phone' | 'texts' | 'photos';
 
 const SECTIONS: { key: KidSection; label: string; path: string }[] = [
   { key: 'rules', label: 'Time, apps and websites', path: '' },
+  { key: 'levels', label: 'Levels and web', path: '/levels' },
   { key: 'phone', label: 'Phone and chores', path: '/phone' },
   { key: 'texts', label: 'Texts', path: '/texts' },
   { key: 'photos', label: 'Photos and videos', path: '/photos' },
 ];
 
-/** The pages of one kid: the rules, the phone and chores, the texts, the photos and videos. */
+/** The pages of one kid: the rules, the level and web rules, the phone and chores, the texts, the photos and videos. */
 export function KidSections({ kidId, current }: { kidId: string; current: KidSection }) {
   return (
     <nav className="subtabs" aria-label="Sections">

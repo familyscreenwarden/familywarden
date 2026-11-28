@@ -85,8 +85,14 @@ class LauncherActivity : ComponentActivity() {
         @JavascriptInterface fun post(msg: String) { Kids.command(msg) }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("stopRing", false)) Where.stopRing()
+    }
+
     override fun onResume() {
         super.onResume()
+        if (intent?.getBooleanExtra("stopRing", false) == true) { Where.stopRing(); intent.removeExtra("stopRing") }
         if (::web.isInitialized) applyLook()
         Kids.atHome()
         if (!::web.isInitialized) return

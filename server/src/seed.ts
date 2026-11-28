@@ -314,6 +314,48 @@ export async function seed(databaseUrl: string, files?: SeedFiles): Promise<void
           ago,
         ]);
       }
+
+      // ---- levels and safe browsing: Ava is on "Big kid" with her own time limits; Max keeps his sites-only list ----
+      await db.query(
+        `UPDATE kids SET level = 'big', birthday = (current_date - interval '10 years 2 months')::date, web_mode = 'filtered', only_allowed_sites = false,
+                web_categories = '{adult,gambling,violence,proxies,social,chat}', web_blocked = '{omegle.com}', texting_who = 'friends'
+          WHERE id = $1`,
+        [ava],
+      );
+      for (const [host, ago] of [['tiktok.com', '40 minutes'], ['discord.com', '2 hours'], ['poki.com', '5 hours']] as const) {
+        await db.query('INSERT INTO blocked_events (account_id, kid_id, device_id, host, at) VALUES ($1, $2, $3, $4, now() - $5::interval)', [accountId, ava, avaPhone, host, ago]);
+      }
+
+      // ---- the live map: two places, Ava's way home from school this afternoon, a check-in ----
+      const school = { lat: 39.7392, lng: -104.9903 };
+      const home = { lat: 39.7508, lng: -104.9767 };
+      const places = await db.query<{ id: string; name: string }>(
+        `INSERT INTO family_places (account_id, name, lat, lng, radius_m) VALUES ($1, 'School', $2, $3, 150), ($1, 'Home', $4, $5, 100) RETURNING id, name`,
+        [accountId, school.lat, school.lng, home.lat, home.lng],
+      );
+      const placeId = (name: string): string | null => places.rows.find((p) => p.name === name)?.id ?? null;
+      await db.query("INSERT INTO kid_location_settings (kid_id, account_id) VALUES ($1, $2)", [ava, accountId]);
+      const steps = 14;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        // A slightly bent line from school to home, the newest point a minute ago.
+        const lat = school.lat + (home.lat - school.lat) * t + Math.sin(t * Math.PI) * 0.0012;
+        const lng = school.lng + (home.lng - school.lng) * t - Math.sin(t * Math.PI) * 0.0015;
+        await db.query(
+          `INSERT INTO kid_locations (account_id, kid_id, device_id, lat, lng, accuracy, battery, charging, at, place_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, false, now() - make_interval(mins => $8), $9)`,
+          [accountId, ava, avaPhone, lat, lng, i === steps ? 18 : 12, 71 - Math.floor(i / 5), (steps - i) * 3 + 1, i === 0 ? placeId('School') : i === steps ? placeId('Home') : null],
+        );
+      }
+      await db.query(
+        `INSERT INTO kid_place_events (account_id, kid_id, place_id, place_name, kind, at) VALUES
+           ($1, $2, $3, 'School', 'leave', now() - interval '40 minutes'), ($1, $2, $4, 'Home', 'arrive', now() - interval '2 minutes')`,
+        [accountId, ava, placeId('School'), placeId('Home')],
+      );
+      await db.query("INSERT INTO kid_place_state (kid_id, place_id, inside, since) VALUES ($1, $2, true, now() - interval '2 minutes')", [ava, placeId('Home')]);
+      await db.query("INSERT INTO kid_checkins (account_id, kid_id, device_id, kind, lat, lng, at) VALUES ($1, $2, $3, 'ok', $4, $5, now() - interval '1 minute')", [
+        accountId, ava, avaPhone, home.lat, home.lng,
+      ]);
     });
     // The rows are in: now the files they point at.
     for (const f of toWrite) {
