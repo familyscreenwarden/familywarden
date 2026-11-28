@@ -1,0 +1,35 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# The parent console, the kid-device API, app downloads and shared video links.
+{$APP_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 320MB
+	}
+	reverse_proxy app:3000
+}
+
+# The sales site (plain files from ../site).
+{$SITE_DOMAIN} {
+	root * /srv/site
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	@private path /screenshots/* /_headers
+	respond @private 404
+	try_files {path} {path}.html {path}/index.html
+	file_server
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+}
+
+www.{$SITE_DOMAIN} {
+	redir https://{$SITE_DOMAIN}{uri} permanent
+}
